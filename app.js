@@ -5,7 +5,7 @@ const statusDiv = document.getElementById('status');
 // Variable global que guardará el mapa completo de bloques
 let bloxdToMinecraftMapping = {};
 
-// Cargar la base de datos completa desde el archivo mapping.json de forma automática al abrir la web
+// Cargar la base de datos completa desde el archivo mapping.json
 fetch('mapping.json')
     .then(response => response.json())
     .then(data => {
@@ -15,20 +15,37 @@ fetch('mapping.json')
     .catch(err => console.error("Error al cargar la base de datos de bloques:", err));
 
 if (dropZone && fileInput) {
-    dropZone.addEventListener('dragover', (e) => { e.preventDefault(); dropZone.classList.add('drag-over'); });
-    dropZone.addEventListener('dragleave', () => dropZone.classList.remove('drag-over'));
+    dropZone.addEventListener('dragover', (e) => { 
+        e.preventDefault(); 
+        dropZone.classList.add('drag-over'); 
+    });
+    
+    dropZone.addEventListener('dragleave', () => {
+        dropZone.classList.remove('drag-over');
+    });
+    
     dropZone.addEventListener('drop', (e) => {
         e.preventDefault();
         dropZone.classList.remove('drag-over');
-        if (e.dataTransfer.files.length > 0) processFile(e.dataTransfer.files);
+        if (e.dataTransfer.files.length > 0) {
+            processFile(e.dataTransfer.files[0]); // Pasa el archivo individual directo
+        }
     });
+    
     fileInput.addEventListener('change', (e) => {
-        if (e.target.files.length > 0) processFile(e.target.files);
+        if (e.target.files.length > 0) {
+            processFile(e.target.files[0]); // Pasa el archivo individual directo
+        }
     });
 }
 
 function processFile(file) {
-    if (!file || !file.name.endsWith('.bloxdschem')) {
+    if (!file) {
+        showStatus('Error: No file detected.', 'error');
+        return;
+    }
+    
+    if (!file.name.endsWith('.bloxdschem')) {
         showStatus('Error: Invalid file format. Please upload a .bloxdschem file.', 'error');
         return;
     }
@@ -49,11 +66,14 @@ function processFile(file) {
 }
 
 function generateSchematic(bloxdBuffer, baseName) {
+    // Definimos un tamaño estándar de caja tridimensional para la estructura
     const width = 16; const height = 16; const length = 16;
     const totalBlocks = width * height * length;
     const blocksArray = new Uint8Array(totalBlocks);
 
     const view = new DataView(bloxdBuffer);
+    
+    // Saltamos los primeros bytes del nombre de la estructura
     let byteIdx = 8; 
 
     for (let y = 0; y < height; y++) {
@@ -75,6 +95,7 @@ function generateSchematic(bloxdBuffer, baseName) {
         }
     }
 
+    // Empaquetar y comprimir usando JSZip para Mine-imator nativo
     const zip = new JSZip();
     zip.file("schematic", blocksArray);
 
@@ -89,7 +110,6 @@ function generateSchematic(bloxdBuffer, baseName) {
     });
 }
 
-// Función auxiliar para alertas en pantalla
 function showStatus(message, type) {
     if (statusDiv) {
         statusDiv.textContent = message;
