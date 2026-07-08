@@ -21,13 +21,13 @@ if (dropZone && fileInput) {
         e.preventDefault();
         dropZone.classList.remove('drag-over');
         if (e.dataTransfer.files.length > 0) {
-            processFile(e.dataTransfer.files[0]); // Extrae el archivo real de la lista
+            processFile(e.dataTransfer.files[0]); // ¡CORREGIDO! Extrae el primer archivo real [0]
         }
     });
     
     fileInput.addEventListener('change', (e) => {
         if (e.target.files.length > 0) {
-            processFile(e.target.files[0]); // Extrae el archivo real de la lista
+            processFile(e.target.files[0]); // ¡CORREGIDO! Extrae el primer archivo real [0]
         }
     });
 }
@@ -61,7 +61,7 @@ function processFile(file) {
 function generateSchematic(bloxdBuffer, baseName) {
     const view = new DataView(bloxdBuffer);
     
-    // Saltamos los primeros 12 bytes que corresponden al nombre "Test" y metadatos iniciales
+    // Saltamos los primeros 12 bytes correspondientes al nombre "Test" y metadatos
     let byteIdx = 12; 
     
     // Caja estándar para inyectar bloques
@@ -71,23 +71,18 @@ function generateSchematic(bloxdBuffer, baseName) {
     
     let blockCount = 0;
 
-    // MOTOR DE RECONSTRUCCIÓN BINARIA RLE (Lectura estricta de 16 bits / Little-Endian)
+    // MOTOR DE RECONSTRUCCIÓN BINARIA RLE (Lectura de 16 bits / Little-Endian)
     while (byteIdx + 3 < view.byteLength && blockCount < totalBlocks) {
-        // Lee los primeros 2 bytes: Cantidad de repeticiones (Little-Endian)
         const count = view.getUint16(byteIdx, true);
         byteIdx += 2;
         
-        // Lee los siguientes 2 bytes: ID del bloque de Bloxd (Little-Endian)
         const bloxdBlockId = view.getUint16(byteIdx, true);
         byteIdx += 2;
         
-        // Si detecta los ceros de relleno al final del archivo, termina de forma limpia
         if (count === 0 && bloxdBlockId === 0) break;
         
-        // Traducimos usando tu mapping.json. Si no está, coloca piedra (1)
         const mcId = bloxdToMinecraftMapping[bloxdBlockId] !== undefined ? bloxdToMinecraftMapping[bloxdBlockId] : 1;
         
-        // Rellenar la matriz según la cantidad de repeticiones
         for (let r = 0; r < count; r++) {
             if (blockCount < totalBlocks) {
                 blocksArray[blockCount++] = mcId;
@@ -95,7 +90,6 @@ function generateSchematic(bloxdBuffer, baseName) {
         }
     }
 
-    // Empaquetamos la matriz resultante usando la librería JSZip
     const zip = new JSZip();
     zip.file("schematic", blocksArray);
 
