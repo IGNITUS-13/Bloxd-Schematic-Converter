@@ -2,55 +2,37 @@ const dropZone = document.getElementById('drop-zone');
 const fileInput = document.getElementById('file-input');
 const statusDiv = document.getElementById('status');
 
-// Variable global que guardará el mapa completo de bloques
 let bloxdToMinecraftMapping = {};
 
-// Cargar la base de datos completa desde el archivo mapping.json
-fetch('mapping.json')
+// Cargar mapeo con un identificador único al final para romper la caché del navegador
+fetch('mapping.json?v=' + Date.now())
     .then(response => response.json())
     .then(data => {
         bloxdToMinecraftMapping = data;
-        console.log("¡Base de datos de bloques cargada con éxito!", Object.keys(bloxdToMinecraftMapping).length, "bloques listos.");
+        console.log("Database synced:", Object.keys(bloxdToMinecraftMapping).length);
     })
-    .catch(err => console.error("Error al cargar la base de datos de bloques:", err));
+    .catch(err => console.error("Error loading JSON:", err));
 
 if (dropZone && fileInput) {
-    dropZone.addEventListener('dragover', (e) => { 
-        e.preventDefault(); 
-        dropZone.classList.add('drag-over'); 
-    });
-    
-    dropZone.addEventListener('dragleave', () => {
-        dropZone.classList.remove('drag-over');
-    });
-    
+    dropZone.addEventListener('dragover', (e) => { e.preventDefault(); dropZone.classList.add('drag-over'); });
+    dropZone.addEventListener('dragleave', () => dropZone.classList.remove('drag-over'));
     dropZone.addEventListener('drop', (e) => {
         e.preventDefault();
         dropZone.classList.remove('drag-over');
-        if (e.dataTransfer.files.length > 0) {
-            processFile(e.dataTransfer.files[0]); // Corregido: Envía el objeto de archivo puro
-        }
+        if (e.dataTransfer.files.length > 0) processFile(e.dataTransfer.files[0]); // Captura el archivo individual
     });
-    
     fileInput.addEventListener('change', (e) => {
-        if (e.target.files.length > 0) {
-            processFile(e.target.files[0]); // Corregido: Envía el objeto de archivo puro
-        }
+        if (e.target.files.length > 0) processFile(e.target.files[0]); // Captura el archivo individual
     });
 }
 
 function processFile(file) {
-    if (!file) {
-        showStatus('Error: No file detected.', 'error');
-        return;
-    }
-    
-    if (!file.name.endsWith('.bloxdschem')) {
+    if (!file || !file.name.endsWith('.bloxdschem')) {
         showStatus('Error: Invalid file format. Please upload a .bloxdschem file.', 'error');
         return;
     }
 
-    showStatus('Reading and decrypting Bloxd data...', 'success');
+    showStatus('Processing structure...', 'success');
 
     const reader = new FileReader();
     reader.onload = function(e) {
@@ -67,47 +49,33 @@ function processFile(file) {
 
 function generateSchematic(bloxdBuffer, baseName) {
     const view = new DataView(bloxdBuffer);
-    
-    // Omitimos los primeros 8 bytes de cabecera de texto
-    const startByte = 8;
+    const startByte = 8; // Saltar cabecera
     const availableBytes = view.byteLength - startByte;
     
     if (availableBytes <= 0) {
-        showStatus('Error: The file does not contain block data.', 'error');
+        showStatus('Error: Empty structure file.', 'error');
         return;
     }
 
-    // AUTODETECCIÓN INTELIGENTE DE TAMAÑO:
-    // Calculamos el tamaño aproximado de una caja cúbica según la cantidad de bloques reales
-    const side = Math.max(1, Math.floor(Math.cbrt(availableBytes)));
-    const width = side;
-    const length = side;
-    // La altura absorbe todo lo que sobre para asegurar que ningún bloque se quede fuera
-    const height = Math.ceil(availableBytes / (width * length));
-    
+    // LÓGICA LINEAL SEGURA: Ajustamos el tamaño tridimensional exacto al largo del archivo
+    const width = Math.min(availableBytes, 8);
+    const length = 1;
+    const height = Math.ceil(availableBytes / width);
     const totalBlocks = width * height * length;
+    
     const blocksArray = new Uint8Array(totalBlocks);
-
     let byteIdx = startByte; 
 
-    for (let y = 0; y < height; y++) {
-        for (let z = 0; z < length; z++) {
-            for (let x = 0; x < width; x++) {
-                const arrayIdx = (y * length + z) * width + x;
-                
-                if (byteIdx < view.byteLength) {
-                    const bloxdBlockId = view.getUint8(byteIdx++);
-                    // Traducir con el JSON. Si no está mapeado, por ahora usa Lana Blanca (35) para Bedwars
-                    const minecraftCompatibleId = bloxdToMinecraftMapping[bloxdBlockId] !== undefined ? bloxdToMinecraftMapping[bloxdBlockId] : 35;
-                    blocksArray[arrayIdx] = minecraftCompatibleId;
-                } else {
-                    blocksArray[arrayIdx] = 0; // Aire para rellenar los huecos vacíos
-                }
-            }
+    for (let i = 0; i < totalBlocks; i++) {
+        if (byteIdx < view.byteLength) {
+            const bloxdBlockId = view.getUint8(byteIdx++);
+            const mcId = bloxdToMinecraftMapping[bloxdBlockId] !== undefined ? bloxdToMinecraftMapping[bloxdBlockId] : 35;
+            blocksArray[i] = mcId;
+        } else {
+            blocksArray[i] = 0; // Aire
         }
     }
 
-    // Empaquetar usando JSZip
     const zip = new JSZip();
     zip.file("schematic", blocksArray);
 
@@ -118,7 +86,7 @@ function generateSchematic(bloxdBuffer, baseName) {
         document.body.appendChild(link);
         link.click();
         document.body.removeChild(link);
-        showStatus('Success! Your compatible .schematic file has been downloaded.', 'success');
+        showStatus('Success! File downloaded.', 'success');
     });
 }
 
