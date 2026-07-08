@@ -4,7 +4,7 @@ const statusDiv = document.getElementById('status');
 
 let bloxdToMinecraftMapping = {};
 
-// Cargar mapeo con un identificador único al final para romper la caché
+// Cargar mapeo rompiendo la caché
 fetch('mapping.json?v=' + Date.now())
     .then(response => response.json())
     .then(data => {
@@ -21,13 +21,13 @@ if (dropZone && fileInput) {
         e.preventDefault();
         dropZone.classList.remove('drag-over');
         if (e.dataTransfer.files.length > 0) {
-            processFile(e.dataTransfer.files[0]); // CORREGIDO: Extrae el primer archivo real de la lista de arrastre
+            processFile(e.dataTransfer.files[0]); // REPARADO: Se extrae el primer archivo real [0]
         }
     });
     
     fileInput.addEventListener('change', (e) => {
         if (e.target.files.length > 0) {
-            processFile(e.target.files[0]); // CORREGIDO: Extrae el primer archivo real de la búsqueda
+            processFile(e.target.files[0]); // REPARADO: Se extrae el primer archivo real [0]
         }
     });
 }
@@ -60,7 +60,7 @@ function processFile(file) {
 
 function generateSchematic(bloxdBuffer, baseName) {
     const view = new DataView(bloxdBuffer);
-    const startByte = 8; // Saltar cabecera de texto
+    const startByte = 8; // Saltar cabecera
     const availableBytes = view.byteLength - startByte;
     
     if (availableBytes <= 0) {
@@ -68,7 +68,7 @@ function generateSchematic(bloxdBuffer, baseName) {
         return;
     }
 
-    // Estructura lineal adaptada exactamente al tamaño del archivo
+    // Estructura lineal adaptada al tamaño exacto del archivo
     const width = Math.min(availableBytes, 8);
     const length = 1;
     const height = Math.ceil(availableBytes / width);
@@ -101,6 +101,7 @@ function generateSchematic(bloxdBuffer, baseName) {
     });
 }
 
+// Mostrar alertas visuales
 function showStatus(message, type) {
     if (statusDiv) {
         statusDiv.textContent = message;
