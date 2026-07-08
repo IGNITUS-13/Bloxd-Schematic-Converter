@@ -16,16 +16,19 @@ if (dropZone && fileInput) {
     dropZone.addEventListener('drop', (e) => {
         e.preventDefault();
         dropZone.classList.remove('drag-over');
-        if (e.dataTransfer.files.length > 0) processFile(e.dataTransfer.files[0]);
+        if (e.dataTransfer.files.length > 0) processFile(e.dataTransfer.files);
     });
     fileInput.addEventListener('change', (e) => {
-        if (e.target.files.length > 0) processFile(e.target.files[0]);
+        if (e.target.files.length > 0) processFile(e.target.files);
     });
 }
 
-function processFile(file) {
-    if (!file.name.endsWith('.bloxdschematic')) {
-        showStatus('Error: Invalid file format. Please upload a .bloxdschematic file.', 'error');
+function processFile(fileList) {
+    const file = fileList[0]; // Obtener el primer archivo arrastrado
+    
+    // CORREGIDO: Ahora busca estrictamente la extensión real .bloxdschem
+    if (!file.name.endsWith('.bloxdschem')) {
+        showStatus('Error: Invalid file format. Please upload a .bloxdschem file.', 'error');
         return;
     }
 
@@ -35,7 +38,7 @@ function processFile(file) {
     reader.onload = function(e) {
         try {
             const arrayBuffer = e.target.result;
-            generateSchematic(arrayBuffer, file.name.replace('.bloxdschematic', ''));
+            generateSchematic(arrayBuffer, file.name.replace('.bloxdschem', ''));
         } catch (err) {
             showStatus('Conversion failed: Insufficient data or corrupt layout.', 'error');
             console.error(err);
