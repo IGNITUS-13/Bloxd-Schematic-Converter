@@ -4,7 +4,7 @@ const statusDiv = document.getElementById('status');
 
 let bloxdToMinecraftMapping = {};
 
-// Cargar mapeo con un identificador único al final para romper la caché del navegador
+// Cargar mapeo con un identificador único al final para romper la caché
 fetch('mapping.json?v=' + Date.now())
     .then(response => response.json())
     .then(data => {
@@ -16,18 +16,29 @@ fetch('mapping.json?v=' + Date.now())
 if (dropZone && fileInput) {
     dropZone.addEventListener('dragover', (e) => { e.preventDefault(); dropZone.classList.add('drag-over'); });
     dropZone.addEventListener('dragleave', () => dropZone.classList.remove('drag-over'));
+    
     dropZone.addEventListener('drop', (e) => {
         e.preventDefault();
         dropZone.classList.remove('drag-over');
-        if (e.dataTransfer.files.length > 0) processFile(e.dataTransfer.files[0]); // Captura el archivo individual
+        if (e.dataTransfer.files.length > 0) {
+            processFile(e.dataTransfer.files[0]); // CORREGIDO: Extrae el primer archivo real de la lista de arrastre
+        }
     });
+    
     fileInput.addEventListener('change', (e) => {
-        if (e.target.files.length > 0) processFile(e.target.files[0]); // Captura el archivo individual
+        if (e.target.files.length > 0) {
+            processFile(e.target.files[0]); // CORREGIDO: Extrae el primer archivo real de la búsqueda
+        }
     });
 }
 
 function processFile(file) {
-    if (!file || !file.name.endsWith('.bloxdschem')) {
+    if (!file) {
+        showStatus('Error: No file detected.', 'error');
+        return;
+    }
+    
+    if (!file.name.endsWith('.bloxdschem')) {
         showStatus('Error: Invalid file format. Please upload a .bloxdschem file.', 'error');
         return;
     }
@@ -49,7 +60,7 @@ function processFile(file) {
 
 function generateSchematic(bloxdBuffer, baseName) {
     const view = new DataView(bloxdBuffer);
-    const startByte = 8; // Saltar cabecera
+    const startByte = 8; // Saltar cabecera de texto
     const availableBytes = view.byteLength - startByte;
     
     if (availableBytes <= 0) {
@@ -57,7 +68,7 @@ function generateSchematic(bloxdBuffer, baseName) {
         return;
     }
 
-    // LÓGICA LINEAL SEGURA: Ajustamos el tamaño tridimensional exacto al largo del archivo
+    // Estructura lineal adaptada exactamente al tamaño del archivo
     const width = Math.min(availableBytes, 8);
     const length = 1;
     const height = Math.ceil(availableBytes / width);
@@ -72,7 +83,7 @@ function generateSchematic(bloxdBuffer, baseName) {
             const mcId = bloxdToMinecraftMapping[bloxdBlockId] !== undefined ? bloxdToMinecraftMapping[bloxdBlockId] : 35;
             blocksArray[i] = mcId;
         } else {
-            blocksArray[i] = 0; // Aire
+            blocksArray[i] = 0;
         }
     }
 
