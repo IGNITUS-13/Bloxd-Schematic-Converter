@@ -28,13 +28,13 @@ if (dropZone && fileInput) {
         e.preventDefault();
         dropZone.classList.remove('drag-over');
         if (e.dataTransfer.files.length > 0) {
-            processFile(e.dataTransfer.files[0]); // Pasa el archivo individual directo
+            processFile(e.dataTransfer.files[0]); // Corregido: Envía el objeto de archivo puro
         }
     });
     
     fileInput.addEventListener('change', (e) => {
         if (e.target.files.length > 0) {
-            processFile(e.target.files[0]); // Pasa el archivo individual directo
+            processFile(e.target.files[0]); // Corregido: Envía el objeto de archivo puro
         }
     });
 }
@@ -66,15 +66,29 @@ function processFile(file) {
 }
 
 function generateSchematic(bloxdBuffer, baseName) {
-    // Definimos un tamaño estándar de caja tridimensional para la estructura
-    const width = 16; const height = 16; const length = 16;
+    const view = new DataView(bloxdBuffer);
+    
+    // Omitimos los primeros 8 bytes de cabecera de texto
+    const startByte = 8;
+    const availableBytes = view.byteLength - startByte;
+    
+    if (availableBytes <= 0) {
+        showStatus('Error: The file does not contain block data.', 'error');
+        return;
+    }
+
+    // AUTODETECCIÓN INTELIGENTE DE TAMAÑO:
+    // Calculamos el tamaño aproximado de una caja cúbica según la cantidad de bloques reales
+    const side = Math.max(1, Math.floor(Math.cbrt(availableBytes)));
+    const width = side;
+    const length = side;
+    // La altura absorbe todo lo que sobre para asegurar que ningún bloque se quede fuera
+    const height = Math.ceil(availableBytes / (width * length));
+    
     const totalBlocks = width * height * length;
     const blocksArray = new Uint8Array(totalBlocks);
 
-    const view = new DataView(bloxdBuffer);
-    
-    // Saltamos los primeros bytes del nombre de la estructura
-    let byteIdx = 8; 
+    let byteIdx = startByte; 
 
     for (let y = 0; y < height; y++) {
         for (let z = 0; z < length; z++) {
@@ -83,19 +97,17 @@ function generateSchematic(bloxdBuffer, baseName) {
                 
                 if (byteIdx < view.byteLength) {
                     const bloxdBlockId = view.getUint8(byteIdx++);
-                    
-                    // Busca la ID en la base de datos JSON externa. Si no existe, usa Piedra (1)
-                    const minecraftCompatibleId = bloxdToMinecraftMapping[bloxdBlockId] !== undefined ? bloxdToMinecraftMapping[bloxdBlockId] : 1;
-                    
+                    // Traducir con el JSON. Si no está mapeado, por ahora usa Lana Blanca (35) para Bedwars
+                    const minecraftCompatibleId = bloxdToMinecraftMapping[bloxdBlockId] !== undefined ? bloxdToMinecraftMapping[bloxdBlockId] : 35;
                     blocksArray[arrayIdx] = minecraftCompatibleId;
                 } else {
-                    blocksArray[arrayIdx] = 0;
+                    blocksArray[arrayIdx] = 0; // Aire para rellenar los huecos vacíos
                 }
             }
         }
     }
 
-    // Empaquetar y comprimir usando JSZip para Mine-imator nativo
+    // Empaquetar usando JSZip
     const zip = new JSZip();
     zip.file("schematic", blocksArray);
 
