@@ -21,24 +21,29 @@ if (dropZone && fileInput) {
         e.preventDefault();
         dropZone.classList.remove('drag-over');
         if (e.dataTransfer.files.length > 0) {
-            processFile(e.dataTransfer.files[0]); // Captura el archivo directo
+            processFile(e.dataTransfer.files[0]); // CORREGIDO: Se extrae el primer archivo real [0]
         }
     });
     
     fileInput.addEventListener('change', (e) => {
         if (e.target.files.length > 0) {
-            processFile(e.target.files[0]); // Captura el archivo directo
+            processFile(e.target.files[0]); // CORREGIDO: Se extrae el primer archivo real [0]
         }
     });
 }
 
 function processFile(file) {
-    if (!file || !file.name.endsWith('.bloxdschem')) {
+    if (!file) {
+        showStatus('Error: No file detected.', 'error');
+        return;
+    }
+    
+    if (!file.name.endsWith('.bloxdschem')) {
         showStatus('Error: Invalid file format. Please upload a .bloxdschem file.', 'error');
         return;
     }
 
-    showStatus('Decompressing and translating Bloxd data...', 'success');
+    showStatus('Processing structure...', 'success');
 
     const reader = new FileReader();
     reader.onload = function(e) {
@@ -54,42 +59,34 @@ function processFile(file) {
 }
 
 function generateSchematic(bloxdBuffer, baseName) {
-    let rawBytes = new Uint8Array(bloxdBuffer);
-    let decompressed;
-
-    // DESCOMPRESIÓN DE DATOS BINARIOS:
-    try {
-        // Pako infla y descomprime los bytes mágicos de Bloxd.io de forma automática
-        decompressed = pako.inflate(rawBytes);
-    } catch (gzipErr) {
-        // Si el archivo ya venía descomprimido por algún motivo, usa los bytes crudos
-        decompressed = rawBytes;
-    }
-
-    if (!decompressed || decompressed.length === 0) {
-        showStatus('Error: Empty structure file after decompression.', 'error');
+    const view = new DataView(bloxdBuffer);
+    const startByte = 8; // Saltar cabecera
+    const availableBytes = view.byteLength - startByte;
+    
+    if (availableBytes <= 0) {
+        showStatus('Error: Empty structure file.', 'error');
         return;
     }
 
-    // Adaptar tamaño exacto
-    const width = Math.min(decompressed.length, 8);
+    // Estructura lineal adaptada al tamaño exacto del archivo
+    const width = Math.min(availableBytes, 8);
     const length = 1;
-    const height = Math.ceil(decompressed.length / width);
+    const height = Math.ceil(availableBytes / width);
     const totalBlocks = width * height * length;
     
     const blocksArray = new Uint8Array(totalBlocks);
+    let byteIdx = startByte; 
 
     for (let i = 0; i < totalBlocks; i++) {
-        if (i < decompressed.length) {
-            const bloxdBlockId = decompressed[i];
+        if (byteIdx < view.byteLength) {
+            const bloxdBlockId = view.getUint8(byteIdx++);
             const mcId = bloxdToMinecraftMapping[bloxdBlockId] !== undefined ? bloxdToMinecraftMapping[bloxdBlockId] : 35;
             blocksArray[i] = mcId;
         } else {
-            blocksArray[i] = 0; // Aire
+            blocksArray[i] = 0;
         }
     }
 
-    // Empaquetar el archivo final para Mine-imator
     const zip = new JSZip();
     zip.file("schematic", blocksArray);
 
@@ -100,7 +97,7 @@ function generateSchematic(bloxdBuffer, baseName) {
         document.body.appendChild(link);
         link.click();
         document.body.removeChild(link);
-        showStatus('Success! File downloaded correctly.', 'success');
+        showStatus('Success! File downloaded.', 'success');
     });
 }
 
