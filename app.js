@@ -60,40 +60,34 @@ function processFile(file) {
 
 function generateSchematic(bloxdBuffer, baseName) {
     const view = new DataView(bloxdBuffer);
-    const rawBytes = new Uint8Array(bloxdBuffer);
     
-    // El nombre "Test" ocupa 4 bytes. Buscamos dinámicamente dónde terminan las letras del nombre
-    let byteIdx = 0;
-    while (byteIdx < rawBytes.length && rawBytes[byteIdx] >= 32 && rawBytes[byteIdx] <= 126) {
-        byteIdx++;
-    }
+    // Saltamos los primeros 12 bytes que corresponden al nombre "Test" y metadatos iniciales
+    let byteIdx = 12; 
     
-    // Leemos las dimensiones reales que vienen justo después del nombre
-    // Saltamos metadatos iniciales fijos basados en tu mapa de Hexed.it
-    byteIdx += 2; 
-    
-    // Ajustamos una caja contenedora estándar para volcar los bloques binarios reconstruídos
+    // Caja estándar para inyectar bloques
     const width = 16; const height = 16; const length = 16;
     const totalBlocks = width * height * length;
     const blocksArray = new Uint8Array(totalBlocks);
     
     let blockCount = 0;
 
-    // MOTOR DE RECONSTRUCCIÓN BINARIA RLE:
-    // Lee los pares de bytes del archivo descifrado de Bloxd.io
-    while (byteIdx < view.byteLength && blockCount < totalBlocks) {
-        // Byte 1: Cantidad de veces que se repite el bloque
-        const count = view.getUint8(byteIdx++);
+    // MOTOR DE RECONSTRUCCIÓN BINARIA RLE (Lectura estricta de 16 bits / Little-Endian)
+    while (byteIdx + 3 < view.byteLength && blockCount < totalBlocks) {
+        // Lee los primeros 2 bytes: Cantidad de repeticiones (Little-Endian)
+        const count = view.getUint16(byteIdx, true);
+        byteIdx += 2;
         
-        if (byteIdx >= view.byteLength) break;
+        // Lee los siguientes 2 bytes: ID del bloque de Bloxd (Little-Endian)
+        const bloxdBlockId = view.getUint16(byteIdx, true);
+        byteIdx += 2;
         
-        // Byte 2: ID real del bloque de Bloxd.io
-        const bloxdBlockId = view.getUint8(byteIdx++);
+        // Si detecta los ceros de relleno al final del archivo, termina de forma limpia
+        if (count === 0 && bloxdBlockId === 0) break;
         
-        // Traducimos usando tu mapping.json. Si no existe, usa Lana Blanca (35) por seguridad
-        const mcId = bloxdToMinecraftMapping[bloxdBlockId] !== undefined ? bloxdToMinecraftMapping[bloxdBlockId] : 35;
+        // Traducimos usando tu mapping.json. Si no está, coloca piedra (1)
+        const mcId = bloxdToMinecraftMapping[bloxdBlockId] !== undefined ? bloxdToMinecraftMapping[bloxdBlockId] : 1;
         
-        // Volcar las repeticiones en la matriz limpia para Mine-imator
+        // Rellenar la matriz según la cantidad de repeticiones
         for (let r = 0; r < count; r++) {
             if (blockCount < totalBlocks) {
                 blocksArray[blockCount++] = mcId;
@@ -101,7 +95,7 @@ function generateSchematic(bloxdBuffer, baseName) {
         }
     }
 
-    // Empaquetamos la matriz limpia usando la librería JSZip
+    // Empaquetamos la matriz resultante usando la librería JSZip
     const zip = new JSZip();
     zip.file("schematic", blocksArray);
 
