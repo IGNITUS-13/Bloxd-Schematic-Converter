@@ -4,7 +4,7 @@ const statusDiv = document.getElementById('status');
 
 let bloxdToMinecraftMapping = {};
 
-// Cargar la base de datos de bloques rompiendo caché
+// Cargar mapeo rompiendo la caché
 fetch('mapping.json?v=' + Date.now())
     .then(response => response.json())
     .then(data => {
@@ -21,24 +21,19 @@ if (dropZone && fileInput) {
         e.preventDefault();
         dropZone.classList.remove('drag-over');
         if (e.dataTransfer.files.length > 0) {
-            processFile(e.dataTransfer.files[0]); // Extrae el archivo real de la lista
+            processFile(e.dataTransfer.files[0]); // Captura el archivo directo
         }
     });
     
     fileInput.addEventListener('change', (e) => {
         if (e.target.files.length > 0) {
-            processFile(e.target.files[0]); // Extrae el archivo real de la lista
+            processFile(e.target.files[0]); // Captura el archivo directo
         }
     });
 }
 
 function processFile(file) {
-    if (!file) {
-        showStatus('Error: No file detected.', 'error');
-        return;
-    }
-    
-    if (!file.name.endsWith('.bloxdschem')) {
+    if (!file || !file.name.endsWith('.bloxdschem')) {
         showStatus('Error: Invalid file format. Please upload a .bloxdschem file.', 'error');
         return;
     }
@@ -59,49 +54,46 @@ function processFile(file) {
 }
 
 function generateSchematic(bloxdBuffer, baseName) {
-    // Intentar leer el buffer crudo directamente
     let rawBytes = new Uint8Array(bloxdBuffer);
-    
-    // Ignorar cabecera inicial de texto si existe
-    let startByte = 0;
-    if (rawBytes[0] !== 0x0A && rawBytes.length > 8) {
-        startByte = 8;
+    let decompressed;
+
+    // DESCOMPRESIÓN DE DATOS BINARIOS:
+    try {
+        // Pako infla y descomprime los bytes mágicos de Bloxd.io de forma automática
+        decompressed = pako.inflate(rawBytes);
+    } catch (gzipErr) {
+        // Si el archivo ya venía descomprimido por algún motivo, usa los bytes crudos
+        decompressed = rawBytes;
     }
-    
-    const availableBytes = rawBytes.length - startByte;
-    if (availableBytes <= 0) {
-        showStatus('Error: Empty structure file.', 'error');
+
+    if (!decompressed || decompressed.length === 0) {
+        showStatus('Error: Empty structure file after decompression.', 'error');
         return;
     }
 
-    // Definición de dimensiones adaptadas para estructuras pequeñas de Bedwars
-    const width = Math.min(availableBytes, 8);
+    // Adaptar tamaño exacto
+    const width = Math.min(decompressed.length, 8);
     const length = 1;
-    const height = Math.ceil(availableBytes / width);
+    const height = Math.ceil(decompressed.length / width);
     const totalBlocks = width * height * length;
     
     const blocksArray = new Uint8Array(totalBlocks);
-    const dataArray = new Uint8Array(totalBlocks);
 
-    let byteIdx = startByte;
     for (let i = 0; i < totalBlocks; i++) {
-        if (byteIdx < rawBytes.length) {
-            const bloxdBlockId = rawBytes[byteIdx++];
-            // Mapear ID usando la base de datos JSON. Por defecto usa lana blanca (35)
+        if (i < decompressed.length) {
+            const bloxdBlockId = decompressed[i];
             const mcId = bloxdToMinecraftMapping[bloxdBlockId] !== undefined ? bloxdToMinecraftMapping[bloxdBlockId] : 35;
             blocksArray[i] = mcId;
         } else {
-            blocksArray[i] = 0; // Rellenar con aire si faltan bytes
+            blocksArray[i] = 0; // Aire
         }
-        dataArray[i] = 0;
     }
 
-    // Crear la estructura exacta del formato NBT clásico (.schematic) que Mine-imator requiere
-    // Evita el error "Could not read schematic file" inyectando las cabeceras requeridas
-    const nbtPayload = new JSZip();
-    nbtPayload.file("schematic", blocksArray);
+    // Empaquetar el archivo final para Mine-imator
+    const zip = new JSZip();
+    zip.file("schematic", blocksArray);
 
-    nbtPayload.generateAsync({type: "blob", compression: "DEFLATE"}).then(function(content) {
+    zip.generateAsync({type: "blob", compression: "DEFLATE"}).then(function(content) {
         const link = document.createElement('a');
         link.href = URL.createObjectURL(content);
         link.download = `${baseName}_converted.schematic`;
