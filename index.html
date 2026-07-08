@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Bloxd to Minecraft Schematic Converter</title>
+    <script src="https://cloudflare.com"></script>
+    <style>
+        :root {
+            --bg-color: #1e222b;
+            --container-bg: #282c34;
+            --accent-color: #00e6bc;
+            --accent-hover: #00b392;
+            --text-color: #abb2bf;
+            --text-light: #ffffff;
+            --border-color: #4b5263;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: var(--bg-color);
+            color: var(--text-color);
+            margin: 0;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+        }
+
+        .converter-container {
+            background-color: var(--container-bg);
+            padding: 2.5rem;
+            border-radius: 12px;
+            box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+            width: 100%;
+            max-width: 520px;
+            text-align: center;
+        }
+
+        h1 {
+            color: var(--text-light);
+            margin-bottom: 0.5rem;
+            font-size: 1.8rem;
+        }
+
+        p {
+            margin-bottom: 2rem;
+            font-size: 0.95rem;
+            color: var(--text-color);
+        }
+
+        .drop-zone {
+            border: 2px dashed var(--border-color);
+            border-radius: 8px;
+            padding: 3.5rem 1.5rem;
+            cursor: pointer;
+            display: block;
+            transition: all 0.3s ease;
+            background-color: rgba(0, 0, 0, 0.15);
+        }
+
+        .drop-zone:hover, .drop-zone.drag-over {
+            border-color: var(--accent-color);
+            background-color: rgba(0, 230, 188, 0.05);
+        }
+
+        .drop-zone p {
+            margin: 0;
+            color: var(--text-light);
+            font-weight: 600;
+        }
+
+        .drop-zone span {
+            display: block;
+            margin-top: 0.5rem;
+            font-size: 0.8rem;
+            color: #5c6370;
+        }
+
+        #file-input {
+            display: none;
+        }
+
+        .status-message {
+            margin-top: 1.5rem;
+            padding: 0.75rem;
+            border-radius: 6px;
+            font-size: 0.9rem;
+            font-weight: bold;
+            display: none;
+        }
+
+        .status-success { 
+            color: #1e222b; 
+            background-color: var(--accent-color);
+        }
+        
+        .status-error { 
+            color: var(--text-light); 
+            background-color: #e06c75;
+        }
+    </style>
+</head>
+<body>
+
+    <div class="converter-container">
+        <h1>Bloxd Schematic Converter</h1>
+        <p>Convert your Bloxd.io structures into Mine-imator compatible .schematic files instantly.</p>
+        
+        <label for="file-input" class="drop-zone" id="drop-zone">
+            <p>Drag & Drop your .bloxdschematic file here</p>
+            <span>or click to browse your computer</span>
+            <input type="file" id="file-input" accept=".bloxdschematic">
+        </label>
+
+        <div id="status" class="status-message"></div>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html>
