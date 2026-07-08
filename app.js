@@ -2,13 +2,17 @@ const dropZone = document.getElementById('drop-zone');
 const fileInput = document.getElementById('file-input');
 const statusDiv = document.getElementById('status');
 
-// Diccionario de traducción: IDs de Bloxd.io mapeadas a IDs numéricas clásicas
-const blockMapping = {
-    "air": 0, "stone": 1, "grass": 2, "dirt": 3, "cobblestone": 4,
-    "wood_planks": 5, "sapling": 6, "bedrock": 7, "water": 9,
-    "lava": 11, "sand": 12, "gravel": 13, "gold_ore": 14,
-    "iron_ore": 15, "coal_ore": 16, "wood_log": 17, "leaves": 18
-};
+// Variable global que guardará el mapa completo de bloques
+let bloxdToMinecraftMapping = {};
+
+// Cargar la base de datos completa desde el archivo mapping.json de forma automática al abrir la web
+fetch('mapping.json')
+    .then(response => response.json())
+    .then(data => {
+        bloxdToMinecraftMapping = data;
+        console.log("¡Base de datos de bloques cargada con éxito!", Object.keys(bloxdToMinecraftMapping).length, "bloques listos.");
+    })
+    .catch(err => console.error("Error al cargar la base de datos de bloques:", err));
 
 if (dropZone && fileInput) {
     dropZone.addEventListener('dragover', (e) => { e.preventDefault(); dropZone.classList.add('drag-over'); });
@@ -23,11 +27,8 @@ if (dropZone && fileInput) {
     });
 }
 
-function processFile(fileList) {
-    const file = fileList[0]; // Obtener el primer archivo arrastrado
-    
-    // CORREGIDO: Ahora busca estrictamente la extensión real .bloxdschem
-    if (!file.name.endsWith('.bloxdschem')) {
+function processFile(file) {
+    if (!file || !file.name.endsWith('.bloxdschem')) {
         showStatus('Error: Invalid file format. Please upload a .bloxdschem file.', 'error');
         return;
     }
@@ -53,15 +54,20 @@ function generateSchematic(bloxdBuffer, baseName) {
     const blocksArray = new Uint8Array(totalBlocks);
 
     const view = new DataView(bloxdBuffer);
-    let byteIdx = 0;
+    let byteIdx = 8; 
 
     for (let y = 0; y < height; y++) {
         for (let z = 0; z < length; z++) {
             for (let x = 0; x < width; x++) {
                 const arrayIdx = (y * length + z) * width + x;
+                
                 if (byteIdx < view.byteLength) {
-                    const bloxdRawId = view.getUint8(byteIdx++);
-                    blocksArray[arrayIdx] = bloxdRawId % 5 === 0 ? 1 : 0;
+                    const bloxdBlockId = view.getUint8(byteIdx++);
+                    
+                    // Busca la ID en la base de datos JSON externa. Si no existe, usa Piedra (1)
+                    const minecraftCompatibleId = bloxdToMinecraftMapping[bloxdBlockId] !== undefined ? bloxdToMinecraftMapping[bloxdBlockId] : 1;
+                    
+                    blocksArray[arrayIdx] = minecraftCompatibleId;
                 } else {
                     blocksArray[arrayIdx] = 0;
                 }
@@ -83,6 +89,7 @@ function generateSchematic(bloxdBuffer, baseName) {
     });
 }
 
+// Función auxiliar para alertas en pantalla
 function showStatus(message, type) {
     if (statusDiv) {
         statusDiv.textContent = message;
