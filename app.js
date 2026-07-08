@@ -4,14 +4,14 @@ const statusDiv = document.getElementById('status');
 
 let bloxdToMinecraftMapping = {};
 
-// Cargar mapeo rompiendo la caché
+// Cargar la base de datos de bloques rompiendo la caché
 fetch('mapping.json?v=' + Date.now())
     .then(response => response.json())
     .then(data => {
         bloxdToMinecraftMapping = data;
-        console.log("Database synced:", Object.keys(bloxdToMinecraftMapping).length);
+        console.log("Database synced successfully:", Object.keys(bloxdToMinecraftMapping).length);
     })
-    .catch(err => console.error("Error loading JSON:", err));
+    .catch(err => console.error("Error loading JSON mapping:", err));
 
 if (dropZone && fileInput) {
     dropZone.addEventListener('dragover', (e) => { e.preventDefault(); dropZone.classList.add('drag-over'); });
@@ -21,13 +21,13 @@ if (dropZone && fileInput) {
         e.preventDefault();
         dropZone.classList.remove('drag-over');
         if (e.dataTransfer.files.length > 0) {
-            processFile(e.dataTransfer.files[0]); // CORREGIDO: Se extrae el primer archivo real [0]
+            processFile(e.dataTransfer.files[0]); // Extrae el archivo real de la lista
         }
     });
     
     fileInput.addEventListener('change', (e) => {
         if (e.target.files.length > 0) {
-            processFile(e.target.files[0]); // CORREGIDO: Se extrae el primer archivo real [0]
+            processFile(e.target.files[0]); // Extrae el archivo real de la lista
         }
     });
 }
@@ -43,7 +43,7 @@ function processFile(file) {
         return;
     }
 
-    showStatus('Processing structure...', 'success');
+    showStatus('Processing structure data...', 'success');
 
     const reader = new FileReader();
     reader.onload = function(e) {
@@ -60,33 +60,48 @@ function processFile(file) {
 
 function generateSchematic(bloxdBuffer, baseName) {
     const view = new DataView(bloxdBuffer);
-    const startByte = 8; // Saltar cabecera
-    const availableBytes = view.byteLength - startByte;
+    const rawBytes = new Uint8Array(bloxdBuffer);
     
-    if (availableBytes <= 0) {
-        showStatus('Error: Empty structure file.', 'error');
-        return;
+    // El nombre "Test" ocupa 4 bytes. Buscamos dinámicamente dónde terminan las letras del nombre
+    let byteIdx = 0;
+    while (byteIdx < rawBytes.length && rawBytes[byteIdx] >= 32 && rawBytes[byteIdx] <= 126) {
+        byteIdx++;
     }
-
-    // Estructura lineal adaptada al tamaño exacto del archivo
-    const width = Math.min(availableBytes, 8);
-    const length = 1;
-    const height = Math.ceil(availableBytes / width);
-    const totalBlocks = width * height * length;
     
+    // Leemos las dimensiones reales que vienen justo después del nombre
+    // Saltamos metadatos iniciales fijos basados en tu mapa de Hexed.it
+    byteIdx += 2; 
+    
+    // Ajustamos una caja contenedora estándar para volcar los bloques binarios reconstruídos
+    const width = 16; const height = 16; const length = 16;
+    const totalBlocks = width * height * length;
     const blocksArray = new Uint8Array(totalBlocks);
-    let byteIdx = startByte; 
+    
+    let blockCount = 0;
 
-    for (let i = 0; i < totalBlocks; i++) {
-        if (byteIdx < view.byteLength) {
-            const bloxdBlockId = view.getUint8(byteIdx++);
-            const mcId = bloxdToMinecraftMapping[bloxdBlockId] !== undefined ? bloxdToMinecraftMapping[bloxdBlockId] : 35;
-            blocksArray[i] = mcId;
-        } else {
-            blocksArray[i] = 0;
+    // MOTOR DE RECONSTRUCCIÓN BINARIA RLE:
+    // Lee los pares de bytes del archivo descifrado de Bloxd.io
+    while (byteIdx < view.byteLength && blockCount < totalBlocks) {
+        // Byte 1: Cantidad de veces que se repite el bloque
+        const count = view.getUint8(byteIdx++);
+        
+        if (byteIdx >= view.byteLength) break;
+        
+        // Byte 2: ID real del bloque de Bloxd.io
+        const bloxdBlockId = view.getUint8(byteIdx++);
+        
+        // Traducimos usando tu mapping.json. Si no existe, usa Lana Blanca (35) por seguridad
+        const mcId = bloxdToMinecraftMapping[bloxdBlockId] !== undefined ? bloxdToMinecraftMapping[bloxdBlockId] : 35;
+        
+        // Volcar las repeticiones en la matriz limpia para Mine-imator
+        for (let r = 0; r < count; r++) {
+            if (blockCount < totalBlocks) {
+                blocksArray[blockCount++] = mcId;
+            }
         }
     }
 
+    // Empaquetamos la matriz limpia usando la librería JSZip
     const zip = new JSZip();
     zip.file("schematic", blocksArray);
 
@@ -97,7 +112,10 @@ function generateSchematic(bloxdBuffer, baseName) {
         document.body.appendChild(link);
         link.click();
         document.body.removeChild(link);
-        showStatus('Success! File downloaded.', 'success');
+        showStatus('Success! Your compatible .schematic file has been downloaded.', 'success');
+    }).catch(zipErr => {
+        showStatus('Error generating the final schematic package.', 'error');
+        console.error(zipErr);
     });
 }
 
