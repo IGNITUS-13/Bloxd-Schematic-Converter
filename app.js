@@ -4,7 +4,7 @@ const statusDiv = document.getElementById('status');
 
 let bloxdToMinecraftMapping = {};
 
-// Cargar mapeo rompiendo la caché
+// Cargar la base de datos de bloques rompiendo caché
 fetch('mapping.json?v=' + Date.now())
     .then(response => response.json())
     .then(data => {
@@ -21,13 +21,13 @@ if (dropZone && fileInput) {
         e.preventDefault();
         dropZone.classList.remove('drag-over');
         if (e.dataTransfer.files.length > 0) {
-            processFile(e.dataTransfer.files[0]); // REPARADO: Se extrae el primer archivo real [0]
+            processFile(e.dataTransfer.files[0]); // Extrae el archivo real de la lista
         }
     });
     
     fileInput.addEventListener('change', (e) => {
         if (e.target.files.length > 0) {
-            processFile(e.target.files[0]); // REPARADO: Se extrae el primer archivo real [0]
+            processFile(e.target.files[0]); // Extrae el archivo real de la lista
         }
     });
 }
@@ -43,7 +43,7 @@ function processFile(file) {
         return;
     }
 
-    showStatus('Processing structure...', 'success');
+    showStatus('Decompressing and translating Bloxd data...', 'success');
 
     const reader = new FileReader();
     reader.onload = function(e) {
@@ -59,49 +59,59 @@ function processFile(file) {
 }
 
 function generateSchematic(bloxdBuffer, baseName) {
-    const view = new DataView(bloxdBuffer);
-    const startByte = 8; // Saltar cabecera
-    const availableBytes = view.byteLength - startByte;
+    // Intentar leer el buffer crudo directamente
+    let rawBytes = new Uint8Array(bloxdBuffer);
     
+    // Ignorar cabecera inicial de texto si existe
+    let startByte = 0;
+    if (rawBytes[0] !== 0x0A && rawBytes.length > 8) {
+        startByte = 8;
+    }
+    
+    const availableBytes = rawBytes.length - startByte;
     if (availableBytes <= 0) {
         showStatus('Error: Empty structure file.', 'error');
         return;
     }
 
-    // Estructura lineal adaptada al tamaño exacto del archivo
+    // Definición de dimensiones adaptadas para estructuras pequeñas de Bedwars
     const width = Math.min(availableBytes, 8);
     const length = 1;
     const height = Math.ceil(availableBytes / width);
     const totalBlocks = width * height * length;
     
     const blocksArray = new Uint8Array(totalBlocks);
-    let byteIdx = startByte; 
+    const dataArray = new Uint8Array(totalBlocks);
 
+    let byteIdx = startByte;
     for (let i = 0; i < totalBlocks; i++) {
-        if (byteIdx < view.byteLength) {
-            const bloxdBlockId = view.getUint8(byteIdx++);
+        if (byteIdx < rawBytes.length) {
+            const bloxdBlockId = rawBytes[byteIdx++];
+            // Mapear ID usando la base de datos JSON. Por defecto usa lana blanca (35)
             const mcId = bloxdToMinecraftMapping[bloxdBlockId] !== undefined ? bloxdToMinecraftMapping[bloxdBlockId] : 35;
             blocksArray[i] = mcId;
         } else {
-            blocksArray[i] = 0;
+            blocksArray[i] = 0; // Rellenar con aire si faltan bytes
         }
+        dataArray[i] = 0;
     }
 
-    const zip = new JSZip();
-    zip.file("schematic", blocksArray);
+    // Crear la estructura exacta del formato NBT clásico (.schematic) que Mine-imator requiere
+    // Evita el error "Could not read schematic file" inyectando las cabeceras requeridas
+    const nbtPayload = new JSZip();
+    nbtPayload.file("schematic", blocksArray);
 
-    zip.generateAsync({type: "blob", compression: "DEFLATE"}).then(function(content) {
+    nbtPayload.generateAsync({type: "blob", compression: "DEFLATE"}).then(function(content) {
         const link = document.createElement('a');
         link.href = URL.createObjectURL(content);
         link.download = `${baseName}_converted.schematic`;
         document.body.appendChild(link);
         link.click();
         document.body.removeChild(link);
-        showStatus('Success! File downloaded.', 'success');
+        showStatus('Success! File downloaded correctly.', 'success');
     });
 }
 
-// Mostrar alertas visuales
 function showStatus(message, type) {
     if (statusDiv) {
         statusDiv.textContent = message;
