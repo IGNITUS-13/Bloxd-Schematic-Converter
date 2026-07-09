@@ -8,6 +8,7 @@ let bloxdToMinecraftMapping = {};
 
 updateProgressText("Connecting block database... ⏳");
 
+// Cargar la base de datos de bloques desde el JSON rompiendo la caché
 fetch('mapping.json?v=' + Date.now())
     .then(response => response.json())
     .then(data => {
@@ -28,19 +29,18 @@ if (dropZone && fileInput) {
         e.preventDefault();
         dropZone.classList.remove('drag-over');
         if (e.dataTransfer.files.length > 0) {
-            processFile(e.dataTransfer.files);
+            processFile(e.dataTransfer.files); // Enviamos la lista de archivos cruda
         }
     });
     
     fileInput.addEventListener('change', (e) => {
         if (e.target.files.length > 0) {
-            processFile(e.target.files);
+            processFile(e.target.files); // Enviamos la lista de archivos cruda
         }
     });
 }
 
 function processFile(fileList) {
-    // Captura correcta del archivo individual de la lista
     const file = fileList[0];
 
     if (!file) {
@@ -72,7 +72,7 @@ function processFile(fileList) {
     reader.readAsArrayBuffer(file);
 }
 
-// CLASE NBTWRITER CORREGIDA AL 100% PARA ESQUEMÁTICAS DE MINECRAFT
+// CLASE NBTWRITER REPARADA CON ESCRITURA EN BIG-ENDIAN ESTRICTA PARA MINECRAFT
 class NBTWriter {
     constructor() {
         this.buffer = [];
@@ -96,7 +96,7 @@ class NBTWriter {
         for (let byte of encoded) this.buffer.push(byte);
     }
     writeByteArray(arr) {
-        this.writeInt(arr.length); 
+        this.writeInt(arr.length); // Longitud en Big-Endian antes de los bloques
         for (let byte of arr) this.buffer.push(byte & 0xFF);
     }
     getUint8Array() {
@@ -110,6 +110,7 @@ async function generateSchematic(bloxdBuffer, baseName) {
     const view = new DataView(bloxdBuffer);
     const rawBytes = new Uint8Array(bloxdBuffer);
     
+    // DETECCIÓN DINÁMICA DEL NOMBRE Y LAS MEDIDAS:
     let byteIdx = 0;
     while (byteIdx < rawBytes.length && rawBytes[byteIdx] >= 32 && rawBytes[byteIdx] <= 126) {
         byteIdx++;
@@ -149,8 +150,8 @@ async function generateSchematic(bloxdBuffer, baseName) {
     updateProgressText("Injecting NBT tags... 🏷️");
 
     const writer = new NBTWriter();
-    // CORRECCIÓN DEFINITIVA: Raíz obligatoria de MCEdit sin nombre ("") para evitar el error de lectura
-    writer.writeByte(0x0A); writer.writeString("Schematic"); 
+    // REPARACIÓN MAESTRA: Escribe TAG_Compound (0x0A) y una cadena vacía ("") como raíz oficial de Mojang
+    writer.writeByte(0x0A); writer.writeString(""); 
     
     writer.writeByte(0x02); writer.writeString("Width"); writer.writeShort(width);
     writer.writeByte(0x02); writer.writeString("Height"); writer.writeShort(height);
