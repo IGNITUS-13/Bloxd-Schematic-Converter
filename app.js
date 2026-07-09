@@ -1,78 +1,20 @@
-const dropZone = document.getElementById('drop-zone');
-const fileInput = document.getElementById('file-input');
-const statusDiv = document.getElementById('status');
-
-let bloxdToMinecraftMapping = {};
-
-// Cargar la base de datos de bloques rompiendo la caché del navegador
-fetch('mapping.json?v=' + Date.now())
-    .then(response => response.json())
-    .then(data => {
-        bloxdToMinecraftMapping = data;
-        console.log("Database synced successfully:", Object.keys(bloxdToMinecraftMapping).length);
-    })
-    .catch(err => console.error("Error loading JSON mapping:", err));
-
-if (dropZone && fileInput) {
-    dropZone.addEventListener('dragover', (e) => { e.preventDefault(); dropZone.classList.add('drag-over'); });
-    dropZone.addEventListener('dragleave', () => dropZone.classList.remove('drag-over'));
-    
-    dropZone.addEventListener('drop', (e) => {
-        e.preventDefault();
-        dropZone.classList.remove('drag-over');
-        if (e.dataTransfer.files.length > 0) {
-            processFile(e.dataTransfer.files); // Extrae el archivo real de la lista
-        }
-    });
-    
-    fileInput.addEventListener('change', (e) => {
-        if (e.target.files.length > 0) {
-            processFile(e.target.files); // Extrae el archivo real de la lista
-        }
-    });
-}
-
-function processFile(file) {
-    if (!file) {
-        showStatus('Error: No file detected.', 'error');
-        return;
-    }
-    
-    if (!file.name.endsWith('.bloxdschem')) {
-        showStatus('Error: Invalid file format. Please upload a .bloxdschem file.', 'error');
-        return;
-    }
-
-    showStatus('Processing structure data...', 'success');
-
-    const reader = new FileReader();
-    reader.onload = function(e) {
-        try {
-            const arrayBuffer = e.target.result;
-            generateSchematic(arrayBuffer, file.name.replace('.bloxdschem', ''));
-        } catch (err) {
-            showStatus('Conversion failed: Insufficient data or corrupt layout.', 'error');
-            console.error(err);
-        }
-    };
-    reader.readAsArrayBuffer(file);
-}
-
 function generateSchematic(bloxdBuffer, baseName) {
     const view = new DataView(bloxdBuffer);
-    
-    // Saltamos los primeros 12 bytes correspondientes al nombre "Test" y metadatos reales
     let byteIdx = 12; 
     
-    // Caja estándar para inyectar bloques
-    const width = 16; const height = 16; const length = 16;
+    // CALCULO DINÁMICO REAL: En lugar de 16 fijo, se adapta al tamaño del archivo de Bloxd
+    const availableBytes = view.byteLength - byteIdx;
+    const width = Math.max(1, Math.min(availableBytes, 8));
+    const length = 1;
+    const height = Math.max(1, Math.ceil(availableBytes / (width * 2))); // Basado en pares de bytes RLE
+    
     const totalBlocks = width * height * length;
     const blocksArray = new Uint8Array(totalBlocks);
     const dataArray = new Uint8Array(totalBlocks);
     
     let blockCount = 0;
 
-    // MOTOR DE RECONSTRUCCIÓN BINARIA RLE (Lectura de 16 bits / Little-Endian)
+    // MOTOR DE RECONSTRUCCIÓN BINARIA RLE
     while (byteIdx + 3 < view.byteLength && blockCount < totalBlocks) {
         const count = view.getUint16(byteIdx, true);
         byteIdx += 2;
@@ -91,17 +33,16 @@ function generateSchematic(bloxdBuffer, baseName) {
         }
     }
 
-    // CABECERA REQUERIDA DE MINECRAFT LEGACY (Extraída de tu análisis)
+    // CABECERA CON LAS MEDIDAS DETECTADAS (Ya no usa 16 fijo, inyecta Width, Height y Length reales)
     const nbtHeader = new Uint8Array([
-        0x0A, 0x00, 0x09, 0x53, 0x63, 0x68, 0x65, 0x6D, 0x61, 0x74, 0x69, 0x63, // TAG_Compound "Schematic" raíz
-        0x02, 0x00, 0x05, 0x57, 0x69, 0x64, 0x74, 0x68, 0x00, 0x10, // Width (Short = 16)
-        0x02, 0x00, 0x06, 0x48, 0x65, 0x69, 0x67, 0x68, 0x74, 0x00, 0x10, // Height (Short = 16)
-        0x02, 0x00, 0x06, 0x4C, 0x65, 0x6E, 0x67, 0x74, 0x68, 0x00, 0x10, // Length (Short = 16)
-        0x08, 0x00, 0x09, 0x4D, 0x61, 0x74, 0x65, 0x72, 0x69, 0x61, 0x6C, 0x73, 0x00, 0x05, 0x41, 0x6C, 0x70, 0x68, 0x61, // Materials ("Alpha")
-        0x07, 0x00, 0x06, 0x42, 0x6C, 0x6F, 0x63, 0x6B, 0x73 // TAG_Byte_Array "Blocks"
+        0x0A, 0x00, 0x09, 0x53, 0x63, 0x68, 0x65, 0x6D, 0x61, 0x74, 0x69, 0x63,
+        0x02, 0x00, 0x05, 0x57, 0x69, 0x64, 0x74, 0x68, (width >> 8) & 0xFF, width & 0xFF,
+        0x02, 0x00, 0x06, 0x48, 0x65, 0x69, 0x67, 0x68, 0x74, (height >> 8) & 0xFF, height & 0xFF,
+        0x02, 0x00, 0x06, 0x4C, 0x65, 0x6E, 0x67, 0x74, 0x68, (length >> 8) & 0xFF, length & 0xFF,
+        0x08, 0x00, 0x09, 0x4D, 0x61, 0x74, 0x65, 0x72, 0x69, 0x61, 0x6C, 0x73, 0x00, 0x05, 0x41, 0x6C, 0x70, 0x68, 0x61,
+        0x07, 0x00, 0x06, 0x42, 0x6C, 0x6F, 0x63, 0x6B, 0x73
     ]);
 
-    // Combinar los bloques en la estructura secuencial NBT
     const rawNbt = new Uint8Array(nbtHeader.length + 4 + blocksArray.length + 11 + dataArray.length + 1);
     let offset = 0;
     
@@ -118,8 +59,6 @@ function generateSchematic(bloxdBuffer, baseName) {
     
     rawNbt[offset++] = 0x00; // TAG_End
 
-    // COMPRESOR DIRECTO GZIP INTEGRADO NATIVO (Simula la compresión clásica de Mojang)
-    // Empaqueta los bytes reales de forma asíncrona usando flujos puros bloqueando el texto claro
     const cs = new CompressionStream('gzip');
     const writer = cs.writable.getWriter();
     writer.write(rawNbt.subarray(0, offset));
@@ -137,12 +76,4 @@ function generateSchematic(bloxdBuffer, baseName) {
         showStatus('Compression failed.', 'error');
         console.error(err);
     });
-}
-
-function showStatus(message, type) {
-    if (statusDiv) {
-        statusDiv.textContent = message;
-        statusDiv.style.display = 'block';
-        statusDiv.className = 'status-message ' + (type === 'success' ? 'status-success' : 'status-error');
-    }
 }
