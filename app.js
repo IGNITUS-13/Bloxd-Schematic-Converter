@@ -8,7 +8,6 @@ let bloxdToMinecraftMapping = {};
 
 updateProgressText("Connecting block database... ⏳");
 
-// Cargar la base de datos de bloques desde el JSON rompiendo la caché
 fetch('mapping.json?v=' + Date.now())
     .then(response => response.json())
     .then(data => {
@@ -41,7 +40,7 @@ if (dropZone && fileInput) {
 }
 
 function processFile(fileList) {
-    // CORRECCIÓN 1: Extraemos estrictamente el primer archivo real usando el índice [0]
+    // REPARADO: Extraemos estrictamente el primer archivo real usando el índice de la lista
     const file = fileList[0];
 
     if (!file) {
@@ -86,7 +85,6 @@ class NBTWriter {
         this.buffer.push(value & 0xFF); 
     }
     writeInt(value) { 
-        // CORRECCIÓN 2: Inversión Big-Endian estricta de 4 bytes para evitar archivos NBT corruptos
         this.buffer.push((value >> 24) & 0xFF); 
         this.buffer.push((value >> 16) & 0xFF); 
         this.buffer.push((value >> 8) & 0xFF); 
@@ -98,7 +96,7 @@ class NBTWriter {
         for (let byte of encoded) this.buffer.push(byte);
     }
     writeByteArray(arr) {
-        this.writeInt(arr.length); // Escribe el tamaño real del array en Big-Endian antes de los bloques
+        this.writeInt(arr.length); // Escribe la longitud del array en Big-Endian antes de los bloques
         for (let byte of arr) this.buffer.push(byte & 0xFF);
     }
     getUint8Array() {
@@ -127,7 +125,7 @@ async function generateSchematic(bloxdBuffer, baseName) {
     
     const totalBlocks = width * height * length;
     
-    // CORRECCIÓN 3: Inicializamos con AIRE (0) para vaciar los espacios alrededor de tu casa
+    // REPARADO: Inicializamos con AIRE (0) para vaciar los espacios alrededor de tu casa
     const blocksArray = new Uint8Array(totalBlocks);
     const dataArray = new Uint8Array(totalBlocks);
     
@@ -140,7 +138,7 @@ async function generateSchematic(bloxdBuffer, baseName) {
         
         if (count === 0 && bloxdBlockId === 0) break;
         
-        // CORRECCIÓN 4: Si el bloque no está mapeado, por defecto es AIRE (0) en vez de piedra sólida
+        // Si el bloque no está mapeado, por defecto es AIRE (0) en vez de piedra sólida
         const mcId = bloxdToMinecraftMapping[bloxdBlockId] !== undefined ? bloxdToMinecraftMapping[bloxdBlockId] : 0;
         
         for (let r = 0; r < count; r++) {
@@ -153,7 +151,7 @@ async function generateSchematic(bloxdBuffer, baseName) {
     updateProgressText("Injecting NBT tags... 🏷️");
 
     const writer = new NBTWriter();
-    writer.writeByte(0x0A); writer.writeString(""); // TAG_Compound raíz obligatorio
+    writer.writeByte(0x0A); writer.writeString(""); // TAG_Compound raíz obligatorio sin nombre
     
     writer.writeByte(0x02); writer.writeString("Width"); writer.writeShort(width);
     writer.writeByte(0x02); writer.writeString("Height"); writer.writeShort(height);
@@ -168,6 +166,8 @@ async function generateSchematic(bloxdBuffer, baseName) {
 
     try {
         const uncompressedData = writer.getUint8Array();
+        
+        // COMPRESIÓN GZIP DIRECTA NATIVA DE UNA CAPA (Igual al Trees4 original sin carpetas Zip)
         const cs = new CompressionStream('gzip');
         const compressWriter = cs.writable.getWriter();
         compressWriter.write(uncompressedData);
