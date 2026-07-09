@@ -102,6 +102,7 @@ function generateSchematic(bloxdBuffer, baseName) {
     const length = view.getUint8(byteIdx++) || 16;
     
     console.log("Dimensions - Width:", width, "Height:", height, "Length:", length);
+    console.log("Starting RLE decode at byte index:", byteIdx);
     
     const totalBlocks = width * height * length;
     const blocksArray = new Uint8Array(totalBlocks);
@@ -109,13 +110,13 @@ function generateSchematic(bloxdBuffer, baseName) {
     
     let blockCount = 0;
 
-    // Parse RLE data: alternating count byte + block ID byte
+    // Parse RLE data: alternating block ID + count byte
     while (byteIdx + 1 < view.byteLength && blockCount < totalBlocks) {
-        const count = view.getUint8(byteIdx++);
         const bloxdBlockId = view.getUint8(byteIdx++);
+        const count = view.getUint8(byteIdx++);
         
         // Stop on double null (0x00 0x00)
-        if (count === 0 && bloxdBlockId === 0) {
+        if (bloxdBlockId === 0 && count === 0) {
             console.log("RLE decode complete at byte", byteIdx - 2);
             break;
         }
