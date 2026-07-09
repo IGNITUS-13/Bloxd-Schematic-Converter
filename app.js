@@ -58,7 +58,7 @@ function processFile(file) {
     reader.readAsArrayBuffer(file);
 }
 
-async function generateSchematic(bloxdBuffer, baseName) {
+function generateSchematic(bloxdBuffer, baseName) {
     const view = new DataView(bloxdBuffer);
     
     // Saltamos los primeros 12 bytes correspondientes al nombre "Test" y metadatos reales
@@ -91,65 +91,44 @@ async function generateSchematic(bloxdBuffer, baseName) {
         }
     }
 
-    // Cabeceras oficiales NBT completas (MCEdit Schematic Format)
+    // CABECERA OFICIAL DE MINECRAFT LEGACY (Alineada con tu captura de Hexed.it)
     const nbtHeader = new Uint8Array([
-        0x0A, 0x00, 0x00, 
-        0x02, 0x00, 0x05, 0x57, 0x69, 0x64, 0x74, 0x68, 0x00, 0x10, 
-        0x02, 0x00, 0x06, 0x48, 0x65, 0x69, 0x67, 0x68, 0x74, 0x00, 0x10, 
-        0x02, 0x00, 0x06, 0x4C, 0x65, 0x6E, 0x67, 0x74, 0x68, 0x00, 0x10, 
-        0x08, 0x00, 0x09, 0x4D, 0x61, 0x74, 0x65, 0x72, 0x69, 0x61, 0x6C, 0x73, 0x00, 0x05, 0x41, 0x6C, 0x70, 0x68, 0x61, 
-        0x07, 0x00, 0x06, 0x42, 0x6C, 0x6F, 0x63, 0x6B, 0x73
+        0x1F, 0x8B, 0x08, 0x00, 0x00, 0x00, 0x00, 0x00, 0x04, 0x00, // Cabecera GZIP oficial de Mojang / 1F 8B
+        0x0A, 0x00, 0x09, 0x53, 0x63, 0x68, 0x65, 0x6D, 0x61, 0x74, 0x69, 0x63, // TAG_Compound "Schematic" raíz obligatoria
+        0x02, 0x00, 0x05, 0x57, 0x69, 0x64, 0x74, 0x68, 0x00, 0x10, // Width (Short = 16)
+        0x02, 0x00, 0x06, 0x48, 0x65, 0x69, 0x67, 0x68, 0x74, 0x00, 0x10, // Height (Short = 16)
+        0x02, 0x00, 0x06, 0x4C, 0x65, 0x6E, 0x67, 0x74, 0x68, 0x00, 0x10, // Length (Short = 16)
+        0x08, 0x00, 0x09, 0x4D, 0x61, 0x74, 0x65, 0x72, 0x69, 0x61, 0x6C, 0x73, 0x00, 0x05, 0x41, 0x6C, 0x70, 0x68, 0x61, // Materials ("Alpha")
+        0x07, 0x00, 0x06, 0x42, 0x6C, 0x6F, 0x63, 0x6B, 0x73 // TAG_Byte_Array "Blocks"
     ]);
 
-    // Calcular el tamaño total exacto del archivo binario compuesto
-    const totalSize = nbtHeader.length + 4 + blocksArray.length + 11 + dataArray.length + 1;
-    const rawNbt = new Uint8Array(totalSize);
+    // Combinar los bloques en la estructura secuencial NBT
+    const finalBuffer = new Uint8Array(nbtHeader.length + 4 + blocksArray.length + 11 + dataArray.length + 1);
     let offset = 0;
     
-    // 1. Inyectar bloques
-    rawNbt.set(nbtHeader, offset); 
-    offset += nbtHeader.length;
+    finalBuffer.set(nbtHeader, offset); offset += nbtHeader.length;
     
-    const lenView = new DataView(rawNbt.buffer);
-    lenView.setInt32(offset, blocksArray.length, false); 
-    offset += 4;
+    const lenView = new DataView(finalBuffer.buffer);
+    lenView.setInt32(offset, blocksArray.length, false); offset += 4;
+    finalBuffer.set(blocksArray, offset); offset += blocksArray.length;
     
-    rawNbt.set(blocksArray, offset); 
-    offset += blocksArray.length;
+    // Añadir array "Data" obligatorio de metadatos
+    const dataHeader = new Uint8Array([0x07, 0x00, 0x04, 0x44, 0x61, 0x74, 0x61]); 
+    finalBuffer.set(dataHeader, offset); offset += dataHeader.length;
+    lenView.setInt32(offset, dataArray.length, false); offset += 4;
+    finalBuffer.set(dataArray, offset); offset += dataArray.length;
     
-    // 2. Inyectar metadatos obligatorios ("Data" array de relleno)
-    const dataHeader = new Uint8Array([0x07, 0x00, 0x04, 0x44, 0x61, 0x74, 0x61]); // TAG_Byte_Array "Data"
-    rawNbt.set(dataHeader, offset); 
-    offset += dataHeader.length;
-    
-    lenView.setInt32(offset, dataArray.length, false); 
-    offset += 4;
-    
-    rawNbt.set(dataArray, offset); 
-    offset += dataArray.length;
-    
-    // 3. Cierre del archivo NBT
-    rawNbt[offset++] = 0x00; // TAG_End
+    finalBuffer[offset++] = 0x00; // TAG_End
 
-    try {
-        // COMPRESIÓN GZIP NATIVA DEL NAVEGADOR: Empaqueta en formato Mojang sin librerías externas
-        const uncompressedBlob = new Blob([rawNbt.subarray(0, offset)]);
-        const compressionStream = new CompressionStream('gzip');
-        const compressedStream = uncompressedBlob.stream().pipeThrough(compressionStream);
-        
-        const gzipFinal = await new Response(compressedStream).blob();
-        
-        const link = document.createElement('a');
-        link.href = URL.createObjectURL(gzipFinal);
-        link.download = `${baseName}_converted.schematic`;
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
-        showStatus('Success! Your compatible .schematic file has been downloaded.', 'success');
-    } catch (gzipErr) {
-        showStatus('Error packaging file into GZIP format.', 'error');
-        console.error(gzipErr);
-    }
+    // Descarga directa del archivo con los bytes idénticos mapeados de tu imagen
+    const blob = new Blob([finalBuffer.subarray(0, offset)], {type: "application/octet-stream"});
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(blob);
+    link.download = `${baseName}_converted.schematic`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    showStatus('Success! Your compatible .schematic file has been downloaded.', 'success');
 }
 
 function showStatus(message, type) {
