@@ -58,7 +58,7 @@ function processFile(file) {
     reader.readAsArrayBuffer(file);
 }
 
-function generateSchematic(bloxdBuffer, baseName) {
+async function generateSchematic(bloxdBuffer, baseName) {
     const view = new DataView(bloxdBuffer);
     
     // Saltamos los primeros 12 bytes correspondientes al nombre "Test" y metadatos reales
@@ -117,7 +117,7 @@ function generateSchematic(bloxdBuffer, baseName) {
     rawNbt.set(blocksArray, offset); 
     offset += blocksArray.length;
     
-    // 2. Inyectar metadatos obligatorios ("Data" array de 16 bits de relleno)
+    // 2. Inyectar metadatos obligatorios ("Data" array de relleno)
     const dataHeader = new Uint8Array([0x07, 0x00, 0x04, 0x44, 0x61, 0x74, 0x61]); // TAG_Byte_Array "Data"
     rawNbt.set(dataHeader, offset); 
     offset += dataHeader.length;
@@ -132,12 +132,15 @@ function generateSchematic(bloxdBuffer, baseName) {
     rawNbt[offset++] = 0x00; // TAG_End
 
     try {
-        // COMPRESIÓN GZIP REAL NATIVA (Usa la librería pako conectada al HTML)
-        const gzipFinal = pako.gzip(rawNbt.subarray(0, offset));
+        // COMPRESIÓN GZIP NATIVA DEL NAVEGADOR: Empaqueta en formato Mojang sin librerías externas
+        const uncompressedBlob = new Blob([rawNbt.subarray(0, offset)]);
+        const compressionStream = new CompressionStream('gzip');
+        const compressedStream = uncompressedBlob.stream().pipeThrough(compressionStream);
         
-        const blob = new Blob([gzipFinal], {type: "application/octet-stream"});
+        const gzipFinal = await new Response(compressedStream).blob();
+        
         const link = document.createElement('a');
-        link.href = URL.createObjectURL(blob);
+        link.href = URL.createObjectURL(gzipFinal);
         link.download = `${baseName}_converted.schematic`;
         document.body.appendChild(link);
         link.click();
@@ -149,7 +152,6 @@ function generateSchematic(bloxdBuffer, baseName) {
     }
 }
 
-// Función auxiliar para alertas en pantalla
 function showStatus(message, type) {
     if (statusDiv) {
         statusDiv.textContent = message;
