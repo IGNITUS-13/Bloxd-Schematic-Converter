@@ -121,6 +121,9 @@ function generateSchematic(bloxdBuffer, baseName) {
     const view = new DataView(bloxdBuffer);
     const rawBytes = new Uint8Array(bloxdBuffer);
     
+    console.log("Total file size:", rawBytes.length, "bytes");
+    console.log("First 50 bytes:", Array.from(rawBytes.slice(0, 50)).map(b => '0x' + b.toString(16).padStart(2, '0')).join(' '));
+    
     // Parse header: Find the end of the text header (first null byte)
     let headerEndIdx = 0;
     for (let i = 0; i < rawBytes.length; i++) {
@@ -132,29 +135,51 @@ function generateSchematic(bloxdBuffer, baseName) {
     
     // Read header as string
     const headerText = new TextDecoder().decode(rawBytes.slice(0, headerEndIdx));
-    console.log("Header:", headerText);
+    console.log("Header:", headerText, "ends at index", headerEndIdx);
     
     // Start reading binary data after the null terminator
     let byteIdx = headerEndIdx + 1;
     
-    // Skip padding bytes until we find non-zero data
-    while (byteIdx < rawBytes.length && rawBytes[byteIdx] === 0) {
-        byteIdx++;
+    console.log("Byte at headerEndIdx+1:", '0x' + rawBytes[byteIdx].toString(16).padStart(2, '0'));
+    
+    // Try reading dimensions directly without padding skip first
+    const width = view.getUint8(byteIdx);
+    const height = view.getUint8(byteIdx + 1);
+    const length = view.getUint8(byteIdx + 2);
+    
+    console.log("Potential dimensions at offset", byteIdx, ":");
+    console.log("  Byte 0:", width, "Byte 1:", height, "Byte 2:", length);
+    console.log("  Hex: 0x" + width.toString(16), "0x" + height.toString(16), "0x" + length.toString(16));
+    
+    // Check if this looks reasonable (dimensions between 1-256)
+    let actualWidth, actualHeight, actualLength;
+    if (width > 0 && width <= 256 && height > 0 && height <= 256 && length > 0 && length <= 256) {
+        console.log("✓ Dimensions look valid");
+        actualWidth = width;
+        actualHeight = height;
+        actualLength = length;
+        byteIdx += 3;
+    } else {
+        console.log("✗ Dimensions don't look valid, trying with padding skip...");
+        // Skip remaining nulls
+        while (byteIdx < rawBytes.length && rawBytes[byteIdx] === 0) {
+            byteIdx++;
+        }
+        actualWidth = view.getUint8(byteIdx++);
+        actualHeight = view.getUint8(byteIdx++);
+        actualLength = view.getUint8(byteIdx++);
+        console.log("After padding skip - Dimensions:", actualWidth, actualHeight, actualLength);
     }
     
-    // Read dimensions (3 bytes for width, height, length)
-    const width = view.getUint8(byteIdx++) || 16;
-    const height = view.getUint8(byteIdx++) || 16;
-    const length = view.getUint8(byteIdx++) || 16;
-    
-    console.log("Dimensions - Width:", width, "Height:", height, "Length:", length);
+    console.log("Final Dimensions - Width:", actualWidth, "Height:", actualHeight, "Length:", actualLength);
     console.log("Starting RLE decode at byte index:", byteIdx);
     
-    const totalBlocks = width * height * length;
+    const totalBlocks = actualWidth * actualHeight * actualLength;
     const blocksArray = new Uint8Array(totalBlocks);
     const dataArray = new Uint8Array(totalBlocks);
     
     let blockCount = 0;
+    let rleBlocks = {};
 
     // Parse RLE data: alternating block ID + count byte
     while (byteIdx + 1 < view.byteLength && blockCount < totalBlocks) {
@@ -166,6 +191,12 @@ function generateSchematic(bloxdBuffer, baseName) {
             console.log("RLE decode complete at byte", byteIdx - 2);
             break;
         }
+        
+        // Track which block IDs we're seeing
+        if (!rleBlocks[bloxdBlockId]) {
+            rleBlocks[bloxdBlockId] = 0;
+        }
+        rleBlocks[bloxdBlockId] += count;
         
         // Map Bloxd block ID to Minecraft block ID
         const mcId = bloxdToMinecraftMapping[bloxdBlockId] !== undefined 
@@ -179,6 +210,9 @@ function generateSchematic(bloxdBuffer, baseName) {
             }
         }
     }
+
+    console.log("Block IDs found in RLE data:", rleBlocks);
+    console.log("Block ID mappings:", Object.entries(rleBlocks).map(([id, count]) => `${id}(${count}x) → MC${bloxdToMinecraftMapping[id] || 0}`).join(", "));
 
     // Fill remaining with air (0)
     while (blockCount < totalBlocks) {
@@ -199,17 +233,17 @@ function generateSchematic(bloxdBuffer, baseName) {
     // Width (TAG_Short)
     nbt.writeByte(0x02);
     nbt.writeString("Width");
-    nbt.writeShort(width);
+    nbt.writeShort(actualWidth);
     
     // Height (TAG_Short)
     nbt.writeByte(0x02);
     nbt.writeString("Height");
-    nbt.writeShort(height);
+    nbt.writeShort(actualHeight);
     
     // Length (TAG_Short)
     nbt.writeByte(0x02);
     nbt.writeString("Length");
-    nbt.writeShort(length);
+    nbt.writeShort(actualLength);
     
     // Materials (TAG_String) - "Alpha" for modern MC
     nbt.writeByte(0x08);
