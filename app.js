@@ -4,7 +4,7 @@ const statusDiv = document.getElementById('status');
 
 let bloxdToMinecraftMapping = {};
 
-// Cargar la base de datos de bloques rompiendo la caché
+// Cargar la base de datos de bloques rompiendo la caché del navegador
 fetch('mapping.json?v=' + Date.now())
     .then(response => response.json())
     .then(data => {
@@ -68,6 +68,7 @@ function generateSchematic(bloxdBuffer, baseName) {
     const width = 16; const height = 16; const length = 16;
     const totalBlocks = width * height * length;
     const blocksArray = new Uint8Array(totalBlocks);
+    const dataArray = new Uint8Array(totalBlocks);
     
     let blockCount = 0;
 
@@ -90,39 +91,65 @@ function generateSchematic(bloxdBuffer, baseName) {
         }
     }
 
-    // GENERADOR NBT NATIVO: Construimos las cabeceras obligatorias que exige Mine-imator sin usar JSZip
+    // Cabeceras oficiales NBT completas (MCEdit Schematic Format)
     const nbtHeader = new Uint8Array([
-        0x0A, 0x00, 0x00, // TAG_Compound raíz sin nombre
-        0x02, 0x00, 0x05, 0x57, 0x69, 0x64, 0x74, 0x68, 0x00, 0x10, // Width (Short = 16)
-        0x02, 0x00, 0x06, 0x48, 0x65, 0x69, 0x67, 0x68, 0x74, 0x00, 0x10, // Height (Short = 16)
-        0x02, 0x00, 0x06, 0x4C, 0x65, 0x6E, 0x67, 0x74, 0x68, 0x00, 0x10, // Length (Short = 16)
-        0x08, 0x00, 0x09, 0x4D, 0x61, 0x74, 0x65, 0x72, 0x69, 0x61, 0x6C, 0x73, 0x00, 0x05, 0x41, 0x6C, 0x70, 0x68, 0x61, // Materials (String = "Alpha")
-        0x07, 0x00, 0x06, 0x42, 0x6C, 0x6F, 0x63, 0x6B, 0x73 // Cabecera TAG_Byte_Array para los bloques
+        0x0A, 0x00, 0x00, 
+        0x02, 0x00, 0x05, 0x57, 0x69, 0x64, 0x74, 0x68, 0x00, 0x10, 
+        0x02, 0x00, 0x06, 0x48, 0x65, 0x69, 0x67, 0x68, 0x74, 0x00, 0x10, 
+        0x02, 0x00, 0x06, 0x4C, 0x65, 0x6E, 0x67, 0x74, 0x68, 0x00, 0x10, 
+        0x08, 0x00, 0x09, 0x4D, 0x61, 0x74, 0x65, 0x72, 0x69, 0x61, 0x6C, 0x73, 0x00, 0x05, 0x41, 0x6C, 0x70, 0x68, 0x61, 
+        0x07, 0x00, 0x06, 0x42, 0x6C, 0x6F, 0x63, 0x6B, 0x73
     ]);
 
-    // Combinamos las cabeceras fijas con la matriz de bloques construida
-    const finalBuffer = new Uint8Array(nbtHeader.length + 4 + blocksArray.length + 1);
-    finalBuffer.set(nbtHeader, 0);
+    // Calcular el tamaño total exacto del archivo binario compuesto
+    const totalSize = nbtHeader.length + 4 + blocksArray.length + 11 + dataArray.length + 1;
+    const rawNbt = new Uint8Array(totalSize);
+    let offset = 0;
     
-    // Inyectamos el tamaño del array de bloques (4 bytes en Big-Endian)
-    const lengthView = new DataView(finalBuffer.buffer);
-    lengthView.setInt32(nbtHeader.length, blocksArray.length, false);
+    // 1. Inyectar bloques
+    rawNbt.set(nbtHeader, offset); 
+    offset += nbtHeader.length;
     
-    // Inyectamos los bloques reales y el cierre del archivo
-    finalBuffer.set(blocksArray, nbtHeader.length + 4);
-    finalBuffer[finalBuffer.length - 1] = 0x00; // TAG_End
+    const lenView = new DataView(rawNbt.buffer);
+    lenView.setInt32(offset, blocksArray.length, false); 
+    offset += 4;
+    
+    rawNbt.set(blocksArray, offset); 
+    offset += blocksArray.length;
+    
+    // 2. Inyectar metadatos obligatorios ("Data" array de 16 bits de relleno)
+    const dataHeader = new Uint8Array([0x07, 0x00, 0x04, 0x44, 0x61, 0x74, 0x61]); // TAG_Byte_Array "Data"
+    rawNbt.set(dataHeader, offset); 
+    offset += dataHeader.length;
+    
+    lenView.setInt32(offset, dataArray.length, false); 
+    offset += 4;
+    
+    rawNbt.set(dataArray, offset); 
+    offset += dataArray.length;
+    
+    // 3. Cierre del archivo NBT
+    rawNbt[offset++] = 0x00; // TAG_End
 
-    // Forzar la descarga directa del archivo binario NBT puro
-    const blob = new Blob([finalBuffer], {type: "application/octet-stream"});
-    const link = document.createElement('a');
-    link.href = URL.createObjectURL(blob);
-    link.download = `${baseName}_converted.schematic`;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    showStatus('Success! Your compatible .schematic file has been downloaded.', 'success');
+    try {
+        // COMPRESIÓN GZIP REAL NATIVA (Usa la librería pako conectada al HTML)
+        const gzipFinal = pako.gzip(rawNbt.subarray(0, offset));
+        
+        const blob = new Blob([gzipFinal], {type: "application/octet-stream"});
+        const link = document.createElement('a');
+        link.href = URL.createObjectURL(blob);
+        link.download = `${baseName}_converted.schematic`;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        showStatus('Success! Your compatible .schematic file has been downloaded.', 'success');
+    } catch (gzipErr) {
+        showStatus('Error packaging file into GZIP format.', 'error');
+        console.error(gzipErr);
+    }
 }
 
+// Función auxiliar para alertas en pantalla
 function showStatus(message, type) {
     if (statusDiv) {
         statusDiv.textContent = message;
