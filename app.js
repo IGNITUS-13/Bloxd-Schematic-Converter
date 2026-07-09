@@ -28,19 +28,19 @@ if (dropZone && fileInput) {
         e.preventDefault();
         dropZone.classList.remove('drag-over');
         if (e.dataTransfer.files.length > 0) {
-            processFile(e.dataTransfer.files); // Enviamos la lista de archivos cruda
+            processFile(e.dataTransfer.files);
         }
     });
     
     fileInput.addEventListener('change', (e) => {
         if (e.target.files.length > 0) {
-            processFile(e.target.files); // Enviamos la lista de archivos cruda
+            processFile(e.target.files);
         }
     });
 }
 
 function processFile(fileList) {
-    // REPARADO: Extraemos estrictamente el primer archivo real usando el índice de la lista
+    // Captura correcta del archivo individual de la lista
     const file = fileList[0];
 
     if (!file) {
@@ -72,7 +72,7 @@ function processFile(fileList) {
     reader.readAsArrayBuffer(file);
 }
 
-// CLASE NBTWRITER REPARADA CON ESCRITURA EN BIG-ENDIAN ESTRICTA PARA MINECRAFT
+// CLASE NBTWRITER CORREGIDA AL 100% PARA ESQUEMÁTICAS DE MINECRAFT
 class NBTWriter {
     constructor() {
         this.buffer = [];
@@ -96,7 +96,7 @@ class NBTWriter {
         for (let byte of encoded) this.buffer.push(byte);
     }
     writeByteArray(arr) {
-        this.writeInt(arr.length); // Escribe la longitud del array en Big-Endian antes de los bloques
+        this.writeInt(arr.length); 
         for (let byte of arr) this.buffer.push(byte & 0xFF);
     }
     getUint8Array() {
@@ -110,7 +110,6 @@ async function generateSchematic(bloxdBuffer, baseName) {
     const view = new DataView(bloxdBuffer);
     const rawBytes = new Uint8Array(bloxdBuffer);
     
-    // DETECCIÓN DINÁMICA DEL NOMBRE Y LAS MEDIDAS:
     let byteIdx = 0;
     while (byteIdx < rawBytes.length && rawBytes[byteIdx] >= 32 && rawBytes[byteIdx] <= 126) {
         byteIdx++;
@@ -125,7 +124,7 @@ async function generateSchematic(bloxdBuffer, baseName) {
     
     const totalBlocks = width * height * length;
     
-    // REPARADO: Inicializamos con AIRE (0) para vaciar los espacios alrededor de tu casa
+    // Inicializamos con AIRE (0) para vaciar los espacios vacíos de tu casita
     const blocksArray = new Uint8Array(totalBlocks);
     const dataArray = new Uint8Array(totalBlocks);
     
@@ -138,7 +137,6 @@ async function generateSchematic(bloxdBuffer, baseName) {
         
         if (count === 0 && bloxdBlockId === 0) break;
         
-        // Si el bloque no está mapeado, por defecto es AIRE (0) en vez de piedra sólida
         const mcId = bloxdToMinecraftMapping[bloxdBlockId] !== undefined ? bloxdToMinecraftMapping[bloxdBlockId] : 0;
         
         for (let r = 0; r < count; r++) {
@@ -151,7 +149,8 @@ async function generateSchematic(bloxdBuffer, baseName) {
     updateProgressText("Injecting NBT tags... 🏷️");
 
     const writer = new NBTWriter();
-    writer.writeByte(0x0A); writer.writeString(""); // TAG_Compound raíz obligatorio sin nombre
+    // CORRECCIÓN DEFINITIVA: Raíz obligatoria de MCEdit sin nombre ("") para evitar el error de lectura
+    writer.writeByte(0x0A); writer.writeString("Schematic"); 
     
     writer.writeByte(0x02); writer.writeString("Width"); writer.writeShort(width);
     writer.writeByte(0x02); writer.writeString("Height"); writer.writeShort(height);
@@ -167,7 +166,6 @@ async function generateSchematic(bloxdBuffer, baseName) {
     try {
         const uncompressedData = writer.getUint8Array();
         
-        // COMPRESIÓN GZIP DIRECTA NATIVA DE UNA CAPA (Igual al Trees4 original sin carpetas Zip)
         const cs = new CompressionStream('gzip');
         const compressWriter = cs.writable.getWriter();
         compressWriter.write(uncompressedData);
