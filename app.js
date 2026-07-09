@@ -21,13 +21,13 @@ if (dropZone && fileInput) {
         e.preventDefault();
         dropZone.classList.remove('drag-over');
         if (e.dataTransfer.files.length > 0) {
-            processFile(e.dataTransfer.files);
+            processFile(e.dataTransfer.files[0]); // Extrae el archivo real de la lista
         }
     });
     
     fileInput.addEventListener('change', (e) => {
         if (e.target.files.length > 0) {
-            processFile(e.target.files);
+            processFile(e.target.files[0]); // Extrae el archivo real de la lista
         }
     });
 }
@@ -62,37 +62,41 @@ function generateSchematic(bloxdBuffer, baseName) {
     const view = new DataView(bloxdBuffer);
     const rawBytes = new Uint8Array(bloxdBuffer);
     
-    // DETECCIÓN DINÁMICA DEL NOMBRE Y LAS MEDIDAS:
+    // DETECCIÓN DINÁMICA DE LA CABECERA:
     let byteIdx = 0;
     while (byteIdx < rawBytes.length && rawBytes[byteIdx] >= 32 && rawBytes[byteIdx] <= 126) {
         byteIdx++;
     }
     
-    // Saltamos el byte de control y leemos el tamaño REAL del mapa guardado por Bloxd
+    // Saltamos el byte de control del nombre
     byteIdx += 1;
+    
+    // Leemos las dimensiones nativas reales (1 byte por eje)
     const width = view.getUint8(byteIdx++) || 16;
     const height = view.getUint8(byteIdx++) || 16;
     const length = view.getUint8(byteIdx++) || 16;
     
-    // Forzamos al puntero a ir al inicio exacto de los bloques RLE (Dirección fija de Bloxd)
-    byteIdx = 12; 
+    // IMPORTANTE: Dejamos que el puntero avance de forma natural a la posición 12
+    if (byteIdx < 12) {
+        byteIdx = 12;
+    }
     
     const totalBlocks = width * height * length;
     
-    // Rellenamos por defecto la matriz con AIRE (0) para vaciar los espacios alrededor de tu casa
+    // Llenamos la matriz por defecto con AIRE (0) para vaciar los espacios alrededor de la casa
     const blocksArray = new Uint8Array(totalBlocks);
     const dataArray = new Uint8Array(totalBlocks);
     
     let blockCount = 0;
 
-    // MOTOR DE RECONSTRUCCIÓN REAL SIN LÍMITES DE TAMAÑO
+    // MOTOR DE RECONSTRUCCIÓN REAL COMPACTO RLE
     while (byteIdx + 1 < view.byteLength && blockCount < totalBlocks) {
         const count = view.getUint8(byteIdx++);
         const bloxdBlockId = view.getUint8(byteIdx++);
         
         if (count === 0 && bloxdBlockId === 0) break;
         
-        // Mapear ID usando mapping.json. Si no existe en tu lista, coloca AIRE (0)
+        // Mapear ID usando mapping.json. Si no existe, coloca AIRE (0)
         const mcId = bloxdToMinecraftMapping[bloxdBlockId] !== undefined ? bloxdToMinecraftMapping[bloxdBlockId] : 0;
         
         for (let r = 0; r < count; r++) {
@@ -102,7 +106,7 @@ function generateSchematic(bloxdBuffer, baseName) {
         }
     }
 
-    // CABECERA NBT ADAPTADA (Escribe en el archivo GZIP las medidas exactas que detectó de tu mapa)
+    // CABECERA NBT ADAPTADA CON LAS MEDIDAS REALES DETECTADAS
     const nbtHeader = new Uint8Array([
         0x0A, 0x00, 0x09, 0x53, 0x63, 0x68, 0x65, 0x6D, 0x61, 0x74, 0x69, 0x63, 
         0x02, 0x00, 0x05, 0x57, 0x69, 0x64, 0x74, 0x68, 0x00, width,             
@@ -127,7 +131,7 @@ function generateSchematic(bloxdBuffer, baseName) {
     
     rawNbt[offset++] = 0x00; // TAG_End
 
-    // ENCRIPTADO EN FLUJO GZIP AUTOMÁTICO
+    // ENCRIPTADO EN FLUJO GZIP AUTOMÁTICO NATIVO
     const cs = new CompressionStream('gzip');
     const writer = cs.writable.getWriter();
     writer.write(rawNbt.subarray(0, offset));
