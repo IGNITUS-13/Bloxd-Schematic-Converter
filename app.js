@@ -21,13 +21,13 @@ if (dropZone && fileInput) {
         e.preventDefault();
         dropZone.classList.remove('drag-over');
         if (e.dataTransfer.files.length > 0) {
-            processFile(e.dataTransfer.files[0]); // ¡CORREGIDO! Extrae el primer archivo real [0]
+            processFile(e.dataTransfer.files[0]); // Extrae el archivo real de la lista
         }
     });
     
     fileInput.addEventListener('change', (e) => {
         if (e.target.files.length > 0) {
-            processFile(e.target.files[0]); // ¡CORREGIDO! Extrae el primer archivo real [0]
+            processFile(e.target.files[0]); // Extrae el archivo real de la lista
         }
     });
 }
@@ -61,7 +61,7 @@ function processFile(file) {
 function generateSchematic(bloxdBuffer, baseName) {
     const view = new DataView(bloxdBuffer);
     
-    // Saltamos los primeros 12 bytes correspondientes al nombre "Test" y metadatos
+    // Saltamos los primeros 12 bytes correspondientes al nombre "Test" y metadatos reales
     let byteIdx = 12; 
     
     // Caja estándar para inyectar bloques
@@ -90,21 +90,37 @@ function generateSchematic(bloxdBuffer, baseName) {
         }
     }
 
-    const zip = new JSZip();
-    zip.file("schematic", blocksArray);
+    // GENERADOR NBT NATIVO: Construimos las cabeceras obligatorias que exige Mine-imator sin usar JSZip
+    const nbtHeader = new Uint8Array([
+        0x0A, 0x00, 0x00, // TAG_Compound raíz sin nombre
+        0x02, 0x00, 0x05, 0x57, 0x69, 0x64, 0x74, 0x68, 0x00, 0x10, // Width (Short = 16)
+        0x02, 0x00, 0x06, 0x48, 0x65, 0x69, 0x67, 0x68, 0x74, 0x00, 0x10, // Height (Short = 16)
+        0x02, 0x00, 0x06, 0x4C, 0x65, 0x6E, 0x67, 0x74, 0x68, 0x00, 0x10, // Length (Short = 16)
+        0x08, 0x00, 0x09, 0x4D, 0x61, 0x74, 0x65, 0x72, 0x69, 0x61, 0x6C, 0x73, 0x00, 0x05, 0x41, 0x6C, 0x70, 0x68, 0x61, // Materials (String = "Alpha")
+        0x07, 0x00, 0x06, 0x42, 0x6C, 0x6F, 0x63, 0x6B, 0x73 // Cabecera TAG_Byte_Array para los bloques
+    ]);
 
-    zip.generateAsync({type: "blob", compression: "DEFLATE"}).then(function(content) {
-        const link = document.createElement('a');
-        link.href = URL.createObjectURL(content);
-        link.download = `${baseName}_converted.schematic`;
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
-        showStatus('Success! Your compatible .schematic file has been downloaded.', 'success');
-    }).catch(zipErr => {
-        showStatus('Error generating the final schematic package.', 'error');
-        console.error(zipErr);
-    });
+    // Combinamos las cabeceras fijas con la matriz de bloques construida
+    const finalBuffer = new Uint8Array(nbtHeader.length + 4 + blocksArray.length + 1);
+    finalBuffer.set(nbtHeader, 0);
+    
+    // Inyectamos el tamaño del array de bloques (4 bytes en Big-Endian)
+    const lengthView = new DataView(finalBuffer.buffer);
+    lengthView.setInt32(nbtHeader.length, blocksArray.length, false);
+    
+    // Inyectamos los bloques reales y el cierre del archivo
+    finalBuffer.set(blocksArray, nbtHeader.length + 4);
+    finalBuffer[finalBuffer.length - 1] = 0x00; // TAG_End
+
+    // Forzar la descarga directa del archivo binario NBT puro
+    const blob = new Blob([finalBuffer], {type: "application/octet-stream"});
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(blob);
+    link.download = `${baseName}_converted.schematic`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    showStatus('Success! Your compatible .schematic file has been downloaded.', 'success');
 }
 
 function showStatus(message, type) {
