@@ -30,19 +30,18 @@ if (dropZone && fileInput) {
         e.preventDefault();
         dropZone.classList.remove('drag-over');
         if (e.dataTransfer.files.length > 0) {
-            processFile(e.dataTransfer.files); // Enviamos la lista cruda
+            processFile(e.dataTransfer.files);
         }
     });
     
     fileInput.addEventListener('change', (e) => {
         if (e.target.files.length > 0) {
-            processFile(e.target.files); // Enviamos la lista cruda
+            processFile(e.target.files);
         }
     });
 }
 
 function processFile(fileList) {
-    // REPARADO DEFECTO DE LISTAS: Extraemos de forma estricta el primer archivo de la lista
     const file = fileList[0];
 
     if (!file) {
@@ -66,12 +65,54 @@ function processFile(fileList) {
             const arrayBuffer = e.target.result;
             generateSchematic(arrayBuffer, file.name.replace('.bloxdschem', ''));
         } catch (err) {
-            showStatus('Conversion failed: Insufficient data or corrupt layout.', 'error');
+            showStatus('Conversion failed: ' + err.message, 'error');
             updateProgressText("<span style='color:#e06c75;'>Conversion failed ❌</span>");
             console.error(err);
         }
     };
     reader.readAsArrayBuffer(file);
+}
+
+// NBT Helper Functions
+class NBTWriter {
+    constructor() {
+        this.buffer = [];
+    }
+
+    writeByte(value) {
+        this.buffer.push(value & 0xFF);
+    }
+
+    writeShort(value) {
+        this.buffer.push((value >> 8) & 0xFF);
+        this.buffer.push(value & 0xFF);
+    }
+
+    writeInt(value) {
+        this.buffer.push((value >> 24) & 0xFF);
+        this.buffer.push((value >> 16) & 0xFF);
+        this.buffer.push((value >> 8) & 0xFF);
+        this.buffer.push(value & 0xFF);
+    }
+
+    writeString(str) {
+        const encoded = new TextEncoder().encode(str);
+        this.writeShort(encoded.length);
+        for (let byte of encoded) {
+            this.buffer.push(byte);
+        }
+    }
+
+    writeByteArray(arr) {
+        this.writeInt(arr.length);
+        for (let byte of arr) {
+            this.buffer.push(byte & 0xFF);
+        }
+    }
+
+    toArray() {
+        return new Uint8Array(this.buffer);
+    }
 }
 
 function generateSchematic(bloxdBuffer, baseName) {
@@ -95,6 +136,11 @@ function generateSchematic(bloxdBuffer, baseName) {
     
     // Start reading binary data after the null terminator
     let byteIdx = headerEndIdx + 1;
+    
+    // Skip padding bytes until we find non-zero data
+    while (byteIdx < rawBytes.length && rawBytes[byteIdx] === 0) {
+        byteIdx++;
+    }
     
     // Read dimensions (3 bytes for width, height, length)
     const width = view.getUint8(byteIdx++) || 16;
@@ -134,39 +180,63 @@ function generateSchematic(bloxdBuffer, baseName) {
         }
     }
 
+    // Fill remaining with air (0)
+    while (blockCount < totalBlocks) {
+        blocksArray[blockCount++] = 0;
+    }
+
     console.log("Total blocks decoded:", blockCount, "Expected:", totalBlocks);
 
     updateProgressText("Injecting NBT tags... 🏷️");
 
-    const nbtHeader = new Uint8Array([
-        0x0A, 0x00, 0x09, 0x53, 0x63, 0x68, 0x65, 0x6D, 0x61, 0x74, 0x69, 0x63, 
-        0x02, 0x00, 0x05, 0x57, 0x69, 0x64, 0x74, 0x68, 0x00, width,             
-        0x02, 0x00, 0x06, 0x48, 0x65, 0x69, 0x67, 0x68, 0x74, 0x00, height,            
-        0x02, 0x00, 0x06, 0x4C, 0x65, 0x6E, 0x67, 0x74, 0x68, 0x00, length,            
-        0x08, 0x00, 0x09, 0x4D, 0x61, 0x74, 0x65, 0x72, 0x69, 0x61, 0x6C, 0x73, 0x00, 0x05, 0x41, 0x6C, 0x70, 0x68, 0x61, 
-        0x07, 0x00, 0x06, 0x42, 0x6C, 0x6F, 0x63, 0x6B, 0x73                  
-    ]);
-
-    const rawNbt = new Uint8Array(nbtHeader.length + 4 + totalBlocks + 11 + totalBlocks + 1);
-    let offset = 0;
+    // Build NBT structure
+    const nbt = new NBTWriter();
     
-    rawNbt.set(nbtHeader, offset); offset += nbtHeader.length;
-    const lenView = new DataView(rawNbt.buffer);
-    lenView.setInt32(offset, totalBlocks, false); offset += 4;
-    rawNbt.set(blocksArray, offset); offset += totalBlocks;
+    // TAG_Compound with root tag "Schematic"
+    nbt.writeByte(0x0A); // TAG_Compound
+    nbt.writeString("Schematic");
     
-    const dataHeader = new Uint8Array([0x07, 0x00, 0x04, 0x44, 0x61, 0x74, 0x61]); 
-    rawNbt.set(dataHeader, offset); offset += dataHeader.length;
-    lenView.setInt32(offset, totalBlocks, false); offset += 4;
-    rawNbt.set(dataArray, offset); offset += totalBlocks;
+    // Width (TAG_Short)
+    nbt.writeByte(0x02);
+    nbt.writeString("Width");
+    nbt.writeShort(width);
     
-    rawNbt[offset++] = 0x00; // TAG_End
+    // Height (TAG_Short)
+    nbt.writeByte(0x02);
+    nbt.writeString("Height");
+    nbt.writeShort(height);
+    
+    // Length (TAG_Short)
+    nbt.writeByte(0x02);
+    nbt.writeString("Length");
+    nbt.writeShort(length);
+    
+    // Materials (TAG_String) - "Alpha" for modern MC
+    nbt.writeByte(0x08);
+    nbt.writeString("Materials");
+    nbt.writeString("Alpha");
+    
+    // Blocks (TAG_Byte_Array)
+    nbt.writeByte(0x07);
+    nbt.writeString("Blocks");
+    nbt.writeByteArray(blocksArray);
+    
+    // Data (TAG_Byte_Array) - block metadata
+    nbt.writeByte(0x07);
+    nbt.writeString("Data");
+    nbt.writeByteArray(dataArray);
+    
+    // TAG_End
+    nbt.writeByte(0x00);
+    
+    const nbtData = nbt.toArray();
+    console.log("NBT data size:", nbtData.length);
 
     updateProgressText("Compressing into GZIP... 📦");
 
     const cs = new CompressionStream('gzip');
     const writer = cs.writable.getWriter();
-    writer.write(rawNbt.subarray(0, offset));
+    writer.write(nbtData);
     writer.close();
 
     new Response(cs.readable).blob().then(gzipBlob => {
@@ -180,22 +250,19 @@ function generateSchematic(bloxdBuffer, baseName) {
         showStatus('Success! Your compatible .schematic file has been downloaded.', 'success');
         updateProgressText("<span style='color:#00e6bc;'>Finished! File Downloaded Check your folder ✅</span>");
         
-        // Regresa al texto original después de 4 segundos
         setTimeout(() => {
             updateProgressText("Drag & Drop your .bloxdschem file here 🚀<br><span style='font-size:0.8rem;color:#5c6370;'>or click to browse your computer</span>");
         }, 4000);
 
     }).catch(err => {
-        showStatus('Compression failed.', 'error');
+        showStatus('Compression failed: ' + err.message, 'error');
         updateProgressText("<span style='color:#e06c75;'>GZIP Compression Failed ❌</span>");
         console.error(err);
     });
 }
 
-// Función mágica para pintar el progreso justo en medio de la pantalla
 function updateProgressText(htmlContent) {
     if (dropZone) {
-        // Buscamos el párrafo principal de texto adentro del recuadro
         const pTag = dropZone.querySelector('p');
         const spanTag = dropZone.querySelector('span');
         if (pTag) {
