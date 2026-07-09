@@ -21,13 +21,13 @@ if (dropZone && fileInput) {
         e.preventDefault();
         dropZone.classList.remove('drag-over');
         if (e.dataTransfer.files.length > 0) {
-            processFile(e.dataTransfer.files); // Extrae el archivo real de la lista
+            processFile(e.dataTransfer.files[0]); // Extrae el archivo real de la lista
         }
     });
     
     fileInput.addEventListener('change', (e) => {
         if (e.target.files.length > 0) {
-            processFile(e.target.files); // Extrae el archivo real de la lista
+            processFile(e.target.files[0]); // Extrae el archivo real de la lista
         }
     });
 }
@@ -61,16 +61,12 @@ function processFile(file) {
 function generateSchematic(bloxdBuffer, baseName) {
     const view = new DataView(bloxdBuffer);
     
-    // DETECCIÓN EXACTA BASADA EN TU ANÁLISIS DE HEXED.IT:
-    // Saltamos la palabra "Test" (4 bytes) y los metadatos iniciales para ir directo a las dimensiones
+    // Leemos las dimensiones nativas guardadas por Bloxd.io en el archivo
     let byteIdx = 4;
-    
-    // Leemos las dimensiones nativas guardadas por Bloxd.io en el archivo de forma exacta
     const width = view.getUint8(byteIdx++) || 16;
     const height = view.getUint8(byteIdx++) || 16;
     const length = view.getUint8(byteIdx++) || 16;
     
-    // Avanzamos el puntero para saltar el resto de la cabecera e ir a los bloques RLE
     byteIdx = 12; 
     
     const totalBlocks = width * height * length;
@@ -98,14 +94,14 @@ function generateSchematic(bloxdBuffer, baseName) {
         }
     }
 
-    // CABECERA CON LAS MEDIDAS DETECTADAS REALES EN BIG-ENDIAN REQUERIDO POR MOJANG
+    // CABECERA CORREGIDA: Se eliminaron los desplazamientos erróneos de bits
     const nbtHeader = new Uint8Array([
         0x0A, 0x00, 0x09, 0x53, 0x63, 0x68, 0x65, 0x6D, 0x61, 0x74, 0x69, 0x63, // TAG_Compound "Schematic"
-        0x02, 0x00, 0x05, 0x57, 0x69, 0x64, 0x74, 0x68, (width >> 8) & 0xFF, width & 0xFF,
-        0x02, 0x00, 0x06, 0x48, 0x65, 0x69, 0x67, 0x68, 0x74, (height >> 8) & 0xFF, height & 0xFF,
-        0x02, 0x00, 0x06, 0x4C, 0x65, 0x6E, 0x67, 0x74, 0x68, (length >> 8) & 0xFF, length & 0xFF,
-        0x08, 0x00, 0x09, 0x4D, 0x61, 0x74, 0x65, 0x72, 0x69, 0x61, 0x6C, 0x73, 0x00, 0x05, 0x41, 0x6C, 0x70, 0x68, 0x61,
-        0x07, 0x00, 0x06, 0x42, 0x6C, 0x6F, 0x63, 0x6B, 0x73
+        0x02, 0x00, 0x05, 0x57, 0x69, 0x64, 0x74, 0x68, 0x00, width,           // Width (Short)
+        0x02, 0x00, 0x06, 0x48, 0x65, 0x69, 0x67, 0x68, 0x74, 0x00, height,         // Height (Short)
+        0x02, 0x00, 0x06, 0x4C, 0x65, 0x6E, 0x67, 0x74, 0x68, 0x00, length,         // Length (Short)
+        0x08, 0x00, 0x09, 0x4D, 0x61, 0x74, 0x65, 0x72, 0x69, 0x61, 0x6C, 0x73, 0x00, 0x05, 0x41, 0x6C, 0x70, 0x68, 0x61, // Materials ("Alpha")
+        0x07, 0x00, 0x06, 0x42, 0x6C, 0x6F, 0x63, 0x6B, 0x73  // TAG_Byte_Array "Blocks"
     ]);
 
     const rawNbt = new Uint8Array(nbtHeader.length + 4 + blocksArray.length + 11 + dataArray.length + 1);
@@ -114,17 +110,17 @@ function generateSchematic(bloxdBuffer, baseName) {
     rawNbt.set(nbtHeader, offset); offset += nbtHeader.length;
     
     const lenView = new DataView(rawNbt.buffer);
-    lenView.setInt32(offset, blockCount, false); offset += 4; // Ajuste dinámico de longitud real
+    lenView.setInt32(offset, blockCount, false); offset += 4;
     rawNbt.set(blocksArray.subarray(0, blockCount), offset); offset += blockCount;
     
     const dataHeader = new Uint8Array([0x07, 0x00, 0x04, 0x44, 0x61, 0x74, 0x61]); 
     rawNbt.set(dataHeader, offset); offset += dataHeader.length;
-    lenView.setInt32(offset, blockCount, false); offset += 4; // Ajuste dinámico de longitud real
+    lenView.setInt32(offset, blockCount, false); offset += 4;
     rawNbt.set(dataArray.subarray(0, blockCount), offset); offset += blockCount;
     
     rawNbt[offset++] = 0x00; // TAG_End
 
-    // ENCRIPTADO EN FLUIJO GZIP REAL
+    // ENCRIPTADO EN FLUJO GZIP REAL
     const cs = new CompressionStream('gzip');
     const writer = cs.writable.getWriter();
     writer.write(rawNbt.subarray(0, offset));
@@ -144,6 +140,7 @@ function generateSchematic(bloxdBuffer, baseName) {
     });
 }
 
+// Función auxiliar para alertas en pantalla
 function showStatus(message, type) {
     if (statusDiv) {
         statusDiv.textContent = message;
