@@ -4,7 +4,7 @@ const statusDiv = document.getElementById('status');
 
 let bloxdToMinecraftMapping = {};
 
-// Cargar la base de datos de bloques rompiendo la caché del navegador
+// Cargar la base de datos completa de bloques desde mapping.json
 fetch('mapping.json?v=' + Date.now())
     .then(response => response.json())
     .then(data => {
@@ -21,13 +21,13 @@ if (dropZone && fileInput) {
         e.preventDefault();
         dropZone.classList.remove('drag-over');
         if (e.dataTransfer.files.length > 0) {
-            processFile(e.dataTransfer.files[0]); // Extrae el archivo real de la lista
+            processFile(e.dataTransfer.files);
         }
     });
     
     fileInput.addEventListener('change', (e) => {
         if (e.target.files.length > 0) {
-            processFile(e.target.files[0]); // Extrae el archivo real de la lista
+            processFile(e.target.files);
         }
     });
 }
@@ -60,29 +60,40 @@ function processFile(file) {
 
 function generateSchematic(bloxdBuffer, baseName) {
     const view = new DataView(bloxdBuffer);
-    let byteIdx = 12; // Saltar cabecera inicial
+    const rawBytes = new Uint8Array(bloxdBuffer);
     
-    // CAJA ESTÁNDAR FIJA SEGURA: 16x16x16 evita que Mine-imator entre en bucles infinitos
-    const width = 16; const height = 16; const length = 16;
+    // DETECCIÓN DINÁMICA DEL NOMBRE Y LAS MEDIDAS:
+    let byteIdx = 0;
+    while (byteIdx < rawBytes.length && rawBytes[byteIdx] >= 32 && rawBytes[byteIdx] <= 126) {
+        byteIdx++;
+    }
+    
+    // Saltamos el byte de control y leemos el tamaño REAL del mapa guardado por Bloxd
+    byteIdx += 1;
+    const width = view.getUint8(byteIdx++) || 16;
+    const height = view.getUint8(byteIdx++) || 16;
+    const length = view.getUint8(byteIdx++) || 16;
+    
+    // Forzamos al puntero a ir al inicio exacto de los bloques RLE (Dirección fija de Bloxd)
+    byteIdx = 12; 
+    
     const totalBlocks = width * height * length;
     
+    // Rellenamos por defecto la matriz con AIRE (0) para vaciar los espacios alrededor de tu casa
     const blocksArray = new Uint8Array(totalBlocks);
     const dataArray = new Uint8Array(totalBlocks);
     
     let blockCount = 0;
 
-    // MOTOR DE RECONSTRUCCIÓN BINARIA RLE MATEADO
-    while (byteIdx + 3 < view.byteLength && blockCount < totalBlocks) {
-        const count = view.getUint16(byteIdx, true);
-        byteIdx += 2;
-        
-        const bloxdBlockId = view.getUint16(byteIdx, true);
-        byteIdx += 2;
+    // MOTOR DE RECONSTRUCCIÓN REAL SIN LÍMITES DE TAMAÑO
+    while (byteIdx + 1 < view.byteLength && blockCount < totalBlocks) {
+        const count = view.getUint8(byteIdx++);
+        const bloxdBlockId = view.getUint8(byteIdx++);
         
         if (count === 0 && bloxdBlockId === 0) break;
         
-        // Traducir con el JSON. Si no existe, usa Piedra (1)
-        const mcId = bloxdToMinecraftMapping[bloxdBlockId] !== undefined ? bloxdToMinecraftMapping[bloxdBlockId] : 1;
+        // Mapear ID usando mapping.json. Si no existe en tu lista, coloca AIRE (0)
+        const mcId = bloxdToMinecraftMapping[bloxdBlockId] !== undefined ? bloxdToMinecraftMapping[bloxdBlockId] : 0;
         
         for (let r = 0; r < count; r++) {
             if (blockCount < totalBlocks) {
@@ -91,35 +102,32 @@ function generateSchematic(bloxdBuffer, baseName) {
         }
     }
 
-    // CABECERA OFICIAL EN INT16 COMPUESTO (MCEdit Schematic Format estricto)
+    // CABECERA NBT ADAPTADA (Escribe en el archivo GZIP las medidas exactas que detectó de tu mapa)
     const nbtHeader = new Uint8Array([
-        0x0A, 0x00, 0x09, 0x53, 0x63, 0x68, 0x65, 0x6D, 0x61, 0x74, 0x69, 0x63, // TAG_Compound "Schematic"
-        0x02, 0x00, 0x05, 0x57, 0x69, 0x64, 0x74, 0x68, 0x00, 0x10,             // Width = 16
-        0x02, 0x00, 0x06, 0x48, 0x65, 0x69, 0x67, 0x68, 0x74, 0x00, 0x10,            // Height = 16
-        0x02, 0x00, 0x06, 0x4C, 0x65, 0x6E, 0x67, 0x74, 0x68, 0x00, 0x10,            // Length = 16
-        0x08, 0x00, 0x09, 0x4D, 0x61, 0x74, 0x65, 0x72, 0x69, 0x61, 0x6C, 0x73, 0x00, 0x05, 0x41, 0x6C, 0x70, 0x68, 0x61, // Materials ("Alpha")
-        0x07, 0x00, 0x06, 0x42, 0x6C, 0x6F, 0x63, 0x6B, 0x73                  // TAG_Byte_Array "Blocks"
+        0x0A, 0x00, 0x09, 0x53, 0x63, 0x68, 0x65, 0x6D, 0x61, 0x74, 0x69, 0x63, 
+        0x02, 0x00, 0x05, 0x57, 0x69, 0x64, 0x74, 0x68, 0x00, width,             
+        0x02, 0x00, 0x06, 0x48, 0x65, 0x69, 0x67, 0x68, 0x74, 0x00, height,            
+        0x02, 0x00, 0x06, 0x4C, 0x65, 0x6E, 0x67, 0x74, 0x68, 0x00, length,            
+        0x08, 0x00, 0x09, 0x4D, 0x61, 0x74, 0x65, 0x72, 0x69, 0x61, 0x6C, 0x73, 0x00, 0x05, 0x41, 0x6C, 0x70, 0x68, 0x61, 
+        0x07, 0x00, 0x06, 0x42, 0x6C, 0x6F, 0x63, 0x6B, 0x73                  
     ]);
 
     const rawNbt = new Uint8Array(nbtHeader.length + 4 + totalBlocks + 11 + totalBlocks + 1);
     let offset = 0;
     
-    // 1. Inyectar bloques rellenando el total exacto de la caja
     rawNbt.set(nbtHeader, offset); offset += nbtHeader.length;
     const lenView = new DataView(rawNbt.buffer);
     lenView.setInt32(offset, totalBlocks, false); offset += 4;
     rawNbt.set(blocksArray, offset); offset += totalBlocks;
     
-    // 2. Inyectar metadatos obligatorios ("Data" array de relleno exacto)
     const dataHeader = new Uint8Array([0x07, 0x00, 0x04, 0x44, 0x61, 0x74, 0x61]); 
     rawNbt.set(dataHeader, offset); offset += dataHeader.length;
     lenView.setInt32(offset, totalBlocks, false); offset += 4;
     rawNbt.set(dataArray, offset); offset += totalBlocks;
     
-    // 3. Cierre matemático exacto del archivo NBT
     rawNbt[offset++] = 0x00; // TAG_End
 
-    // ENCRIPTADO EN FLUJO GZIP REAL
+    // ENCRIPTADO EN FLUJO GZIP AUTOMÁTICO
     const cs = new CompressionStream('gzip');
     const writer = cs.writable.getWriter();
     writer.write(rawNbt.subarray(0, offset));
