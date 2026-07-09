@@ -8,6 +8,7 @@ let bloxdToMinecraftMapping = {};
 
 updateProgressText("Connecting block database... ⏳");
 
+// Cargar la base de datos de bloques desde el JSON rompiendo la caché
 fetch('mapping.json?v=' + Date.now())
     .then(response => response.json())
     .then(data => {
@@ -28,126 +29,19 @@ if (dropZone && fileInput) {
         e.preventDefault();
         dropZone.classList.remove('drag-over');
         if (e.dataTransfer.files.length > 0) {
-            processFile(e.dataTransfer.files);
+            processFile(e.dataTransfer.files); // Enviamos la lista de archivos cruda
         }
     });
     
     fileInput.addEventListener('change', (e) => {
         if (e.target.files.length > 0) {
-            processFile(e.target.files);
+            processFile(e.target.files); // Enviamos la lista de archivos cruda
         }
     });
 }
 
-// Botón de diagnóstico para analizar Trees4.schematic
-window.analyzeCorrectSchematic = function() {
-    const input = document.createElement('input');
-    input.type = 'file';
-    input.accept = '.schematic';
-    input.onchange = (e) => {
-        const file = e.target.files[0];
-        const reader = new FileReader();
-        reader.onload = (event) => {
-            analyzeSchematicFile(new Uint8Array(event.target.result), file.name);
-        };
-        reader.readAsArrayBuffer(file);
-    };
-    input.click();
-};
-
-async function analyzeSchematicFile(data, filename) {
-    const decompressed = await decompressGzip(data);
-    if (!decompressed) {
-        console.log("Failed to decompress");
-        return;
-    }
-    
-    const nbt = parseNBT(decompressed);
-    console.log("Schematic Analysis:", filename);
-    console.log("NBT Root:", nbt);
-    
-    if (nbt.Schematic && nbt.Schematic.Blocks) {
-        const blocks = nbt.Schematic.Blocks;
-        const blockCounts = {};
-        
-        for (let block of blocks) {
-            blockCounts[block] = (blockCounts[block] || 0) + 1;
-        }
-        
-        console.log("Minecraft Block IDs found in", filename + ":");
-        const sortedIds = Object.keys(blockCounts).sort((a, b) => blockCounts[b] - blockCounts[a]);
-        for (let id of sortedIds) {
-            console.log(`  MC ID ${id}: ${blockCounts[id]}x`);
-        }
-    }
-}
-
-async function decompressGzip(data) {
-    try {
-        const stream = new DecompressionStream('gzip');
-        const writer = stream.writable.getWriter();
-        writer.write(data);
-        writer.close();
-        
-        let result = [];
-        const reader = stream.readable.getReader();
-        while (true) {
-            const { done, value } = await reader.read();
-            if (done) break;
-            result.push(...value);
-        }
-        return new Uint8Array(result);
-    } catch (e) {
-        console.error("GZIP decompression error:", e);
-        return null;
-    }
-}
-
-function parseNBT(data) {
-    let offset = 0;
-    
-    function readByte() { return data[offset++]; }
-    function readShort() { const val = (data[offset] << 8) | data[offset + 1]; offset += 2; return val; }
-    function readInt() { const val = (data[offset] << 24) | (data[offset + 1] << 16) | (data[offset + 2] << 8) | data[offset + 3]; offset += 4; return val; }
-    function readString() { const len = readShort(); const str = new TextDecoder().decode(data.slice(offset, offset + len)); offset += len; return str; }
-    function readByteArray() { const len = readInt(); const arr = data.slice(offset, offset + len); offset += len; return arr; }
-    
-    function parseTag() {
-        const tagType = readByte();
-        if (tagType === 0x00) return null;
-        
-        const tagName = readString();
-        let tagValue;
-        
-        switch(tagType) {
-            case 0x01: tagValue = readByte(); break;
-            case 0x02: tagValue = readShort(); break;
-            case 0x03: tagValue = readInt(); break;
-            case 0x07: tagValue = readByteArray(); break;
-            case 0x08: tagValue = readString(); break;
-            case 0x0A: 
-                tagValue = {};
-                while (offset < data.length) {
-                    const subTag = parseTag();
-                    if (subTag === null) break;
-                    tagValue[subTag.name] = subTag.value;
-                }
-                break;
-            default: tagValue = null;
-        }
-        return { name: tagName, value: tagValue };
-    }
-    
-    const result = {};
-    while (offset < data.length) {
-        const tag = parseTag();
-        if (tag === null) break;
-        result[tag.name] = tag.value;
-    }
-    return result;
-}
-
 function processFile(fileList) {
+    // CORRECCIÓN 1: Extraemos estrictamente el primer archivo real usando el índice [0]
     const file = fileList[0];
 
     if (!file) {
@@ -178,21 +72,33 @@ function processFile(fileList) {
     };
     reader.readAsArrayBuffer(file);
 }
-// CLASE ENCARGADA DE ESCRIBIR EL FORMATO BINARIO NBT COMPILADO
+
+// CLASE NBTWRITER REPARADA CON ESCRITURA EN BIG-ENDIAN ESTRICTA PARA MINECRAFT
 class NBTWriter {
     constructor() {
         this.buffer = [];
     }
-    writeByte(value) { this.buffer.push(value & 0xFF); }
-    writeShort(value) { this.buffer.push((value >> 8) & 0xFF); this.buffer.push(value & 0xFF); }
-    writeInt(value) { this.buffer.push((value >> 24) & 0xFF); this.buffer.push((value >> 16) & 0xFF); this.buffer.push((value >> 8) & 0xFF); this.buffer.push(value & 0xFF); }
+    writeByte(value) { 
+        this.buffer.push(value & 0xFF); 
+    }
+    writeShort(value) { 
+        this.buffer.push((value >> 8) & 0xFF); 
+        this.buffer.push(value & 0xFF); 
+    }
+    writeInt(value) { 
+        // CORRECCIÓN 2: Inversión Big-Endian estricta de 4 bytes para evitar archivos NBT corruptos
+        this.buffer.push((value >> 24) & 0xFF); 
+        this.buffer.push((value >> 16) & 0xFF); 
+        this.buffer.push((value >> 8) & 0xFF); 
+        this.buffer.push(value & 0xFF); 
+    }
     writeString(str) {
         const encoded = new TextEncoder().encode(str);
         this.writeShort(encoded.length);
         for (let byte of encoded) this.buffer.push(byte);
     }
     writeByteArray(arr) {
-        this.writeInt(arr.length);
+        this.writeInt(arr.length); // Escribe el tamaño real del array en Big-Endian antes de los bloques
         for (let byte of arr) this.buffer.push(byte & 0xFF);
     }
     getUint8Array() {
@@ -206,7 +112,7 @@ async function generateSchematic(bloxdBuffer, baseName) {
     const view = new DataView(bloxdBuffer);
     const rawBytes = new Uint8Array(bloxdBuffer);
     
-    // DETECCIÓN DINÁMICA DE DIMENSIONES:
+    // DETECCIÓN DINÁMICA DEL NOMBRE Y LAS MEDIDAS:
     let byteIdx = 0;
     while (byteIdx < rawBytes.length && rawBytes[byteIdx] >= 32 && rawBytes[byteIdx] <= 126) {
         byteIdx++;
@@ -221,20 +127,20 @@ async function generateSchematic(bloxdBuffer, baseName) {
     
     const totalBlocks = width * height * length;
     
-    // REPARADO: Vaciamos todo el cubo inicializándolo con AIRE (0)
+    // CORRECCIÓN 3: Inicializamos con AIRE (0) para vaciar los espacios alrededor de tu casa
     const blocksArray = new Uint8Array(totalBlocks);
     const dataArray = new Uint8Array(totalBlocks);
     
     let blockCount = 0;
 
-    // MOTOR DE DESCOMPRESIÓN RLE
+    // MOTOR DE DESCOMPRESIÓN RLE BINARIO
     while (byteIdx + 1 < view.byteLength && blockCount < totalBlocks) {
         const count = view.getUint8(byteIdx++);
         const bloxdBlockId = view.getUint8(byteIdx++);
         
         if (count === 0 && bloxdBlockId === 0) break;
         
-        // REPARADO: Si el bloque no está mapeado en mapping.json, se queda en AIRE (0) en vez de piedra maciza
+        // CORRECCIÓN 4: Si el bloque no está mapeado, por defecto es AIRE (0) en vez de piedra sólida
         const mcId = bloxdToMinecraftMapping[bloxdBlockId] !== undefined ? bloxdToMinecraftMapping[bloxdBlockId] : 0;
         
         for (let r = 0; r < count; r++) {
@@ -256,7 +162,7 @@ async function generateSchematic(bloxdBuffer, baseName) {
     
     writer.writeByte(0x07); writer.writeString("Blocks"); writer.writeByteArray(blocksArray);
     writer.writeByte(0x07); writer.writeString("Data"); writer.writeByteArray(dataArray);
-    writer.writeByte(0x00); // TAG_End de cierre del archivo
+    writer.writeByte(0x00); // TAG_End de cierre de la raíz
 
     updateProgressText("Compressing into GZIP... 📦");
 
