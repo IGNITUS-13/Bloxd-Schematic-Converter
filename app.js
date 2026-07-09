@@ -80,20 +80,28 @@ function generateSchematic(bloxdBuffer, baseName) {
     const view = new DataView(bloxdBuffer);
     const rawBytes = new Uint8Array(bloxdBuffer);
     
-    let byteIdx = 0;
-    while (byteIdx < rawBytes.length && rawBytes[byteIdx] >= 32 && rawBytes[byteIdx] <= 126) {
-        byteIdx++;
+    // Parse header: Find the end of the text header (first null byte)
+    let headerEndIdx = 0;
+    for (let i = 0; i < rawBytes.length; i++) {
+        if (rawBytes[i] === 0) {
+            headerEndIdx = i;
+            break;
+        }
     }
     
-    byteIdx += 1;
+    // Read header as string
+    const headerText = new TextDecoder().decode(rawBytes.slice(0, headerEndIdx));
+    console.log("Header:", headerText);
     
+    // Start reading binary data after the null terminator
+    let byteIdx = headerEndIdx + 1;
+    
+    // Read dimensions (3 bytes for width, height, length)
     const width = view.getUint8(byteIdx++) || 16;
     const height = view.getUint8(byteIdx++) || 16;
     const length = view.getUint8(byteIdx++) || 16;
     
-    if (byteIdx < 12) {
-        byteIdx = 12;
-    }
+    console.log("Dimensions - Width:", width, "Height:", height, "Length:", length);
     
     const totalBlocks = width * height * length;
     const blocksArray = new Uint8Array(totalBlocks);
@@ -101,20 +109,31 @@ function generateSchematic(bloxdBuffer, baseName) {
     
     let blockCount = 0;
 
+    // Parse RLE data: alternating count byte + block ID byte
     while (byteIdx + 1 < view.byteLength && blockCount < totalBlocks) {
         const count = view.getUint8(byteIdx++);
         const bloxdBlockId = view.getUint8(byteIdx++);
         
-        if (count === 0 && bloxdBlockId === 0) break;
+        // Stop on double null (0x00 0x00)
+        if (count === 0 && bloxdBlockId === 0) {
+            console.log("RLE decode complete at byte", byteIdx - 2);
+            break;
+        }
         
-        const mcId = bloxdToMinecraftMapping[bloxdBlockId] !== undefined ? bloxdToMinecraftMapping[bloxdBlockId] : 0;
+        // Map Bloxd block ID to Minecraft block ID
+        const mcId = bloxdToMinecraftMapping[bloxdBlockId] !== undefined 
+            ? bloxdToMinecraftMapping[bloxdBlockId] 
+            : 0;
         
+        // Fill blocks array with RLE count
         for (let r = 0; r < count; r++) {
             if (blockCount < totalBlocks) {
                 blocksArray[blockCount++] = mcId;
             }
         }
     }
+
+    console.log("Total blocks decoded:", blockCount, "Expected:", totalBlocks);
 
     updateProgressText("Injecting NBT tags... 🏷️");
 
