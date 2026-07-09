@@ -21,13 +21,13 @@ if (dropZone && fileInput) {
         e.preventDefault();
         dropZone.classList.remove('drag-over');
         if (e.dataTransfer.files.length > 0) {
-            processFile(e.dataTransfer.files[0]); // Extrae el archivo real de la lista
+            processFile(e.dataTransfer.files); // Extrae el archivo real de la lista
         }
     });
     
     fileInput.addEventListener('change', (e) => {
         if (e.target.files.length > 0) {
-            processFile(e.target.files[0]); // Extrae el archivo real de la lista
+            processFile(e.target.files); // Extrae el archivo real de la lista
         }
     });
 }
@@ -91,10 +91,9 @@ function generateSchematic(bloxdBuffer, baseName) {
         }
     }
 
-    // CABECERA OFICIAL DE MINECRAFT LEGACY (Alineada con tu captura de Hexed.it)
+    // CABECERA REQUERIDA DE MINECRAFT LEGACY (Extraída de tu análisis)
     const nbtHeader = new Uint8Array([
-        0x1F, 0x8B, 0x08, 0x00, 0x00, 0x00, 0x00, 0x00, 0x04, 0x00, // Cabecera GZIP oficial de Mojang / 1F 8B
-        0x0A, 0x00, 0x09, 0x53, 0x63, 0x68, 0x65, 0x6D, 0x61, 0x74, 0x69, 0x63, // TAG_Compound "Schematic" raíz obligatoria
+        0x0A, 0x00, 0x09, 0x53, 0x63, 0x68, 0x65, 0x6D, 0x61, 0x74, 0x69, 0x63, // TAG_Compound "Schematic" raíz
         0x02, 0x00, 0x05, 0x57, 0x69, 0x64, 0x74, 0x68, 0x00, 0x10, // Width (Short = 16)
         0x02, 0x00, 0x06, 0x48, 0x65, 0x69, 0x67, 0x68, 0x74, 0x00, 0x10, // Height (Short = 16)
         0x02, 0x00, 0x06, 0x4C, 0x65, 0x6E, 0x67, 0x74, 0x68, 0x00, 0x10, // Length (Short = 16)
@@ -103,32 +102,41 @@ function generateSchematic(bloxdBuffer, baseName) {
     ]);
 
     // Combinar los bloques en la estructura secuencial NBT
-    const finalBuffer = new Uint8Array(nbtHeader.length + 4 + blocksArray.length + 11 + dataArray.length + 1);
+    const rawNbt = new Uint8Array(nbtHeader.length + 4 + blocksArray.length + 11 + dataArray.length + 1);
     let offset = 0;
     
-    finalBuffer.set(nbtHeader, offset); offset += nbtHeader.length;
+    rawNbt.set(nbtHeader, offset); offset += nbtHeader.length;
     
-    const lenView = new DataView(finalBuffer.buffer);
+    const lenView = new DataView(rawNbt.buffer);
     lenView.setInt32(offset, blocksArray.length, false); offset += 4;
-    finalBuffer.set(blocksArray, offset); offset += blocksArray.length;
+    rawNbt.set(blocksArray, offset); offset += blocksArray.length;
     
-    // Añadir array "Data" obligatorio de metadatos
     const dataHeader = new Uint8Array([0x07, 0x00, 0x04, 0x44, 0x61, 0x74, 0x61]); 
-    finalBuffer.set(dataHeader, offset); offset += dataHeader.length;
+    rawNbt.set(dataHeader, offset); offset += dataHeader.length;
     lenView.setInt32(offset, dataArray.length, false); offset += 4;
-    finalBuffer.set(dataArray, offset); offset += dataArray.length;
+    rawNbt.set(dataArray, offset); offset += dataArray.length;
     
-    finalBuffer[offset++] = 0x00; // TAG_End
+    rawNbt[offset++] = 0x00; // TAG_End
 
-    // Descarga directa del archivo con los bytes idénticos mapeados de tu imagen
-    const blob = new Blob([finalBuffer.subarray(0, offset)], {type: "application/octet-stream"});
-    const link = document.createElement('a');
-    link.href = URL.createObjectURL(blob);
-    link.download = `${baseName}_converted.schematic`;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    showStatus('Success! Your compatible .schematic file has been downloaded.', 'success');
+    // COMPRESOR DIRECTO GZIP INTEGRADO NATIVO (Simula la compresión clásica de Mojang)
+    // Empaqueta los bytes reales de forma asíncrona usando flujos puros bloqueando el texto claro
+    const cs = new CompressionStream('gzip');
+    const writer = cs.writable.getWriter();
+    writer.write(rawNbt.subarray(0, offset));
+    writer.close();
+
+    new Response(cs.readable).blob().then(gzipBlob => {
+        const link = document.createElement('a');
+        link.href = URL.createObjectURL(gzipBlob);
+        link.download = `${baseName}_converted.schematic`;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        showStatus('Success! Your compatible .schematic file has been downloaded.', 'success');
+    }).catch(err => {
+        showStatus('Compression failed.', 'error');
+        console.error(err);
+    });
 }
 
 function showStatus(message, type) {
