@@ -2,12 +2,10 @@ const dropZone = document.getElementById('drop-zone');
 const fileInput = document.getElementById('file-input');
 const statusDiv = document.getElementById('status');
 
-// Guardamos el texto original del cuadro para poder restablecerlo
 const originalDropZoneHTML = dropZone.innerHTML;
 
 let bloxdToMinecraftMapping = {};
 
-// Mostrar estado inicial de carga en la consola y actualizar recuadro
 updateProgressText("Connecting block database... ⏳");
 
 fetch('mapping.json?v=' + Date.now())
@@ -39,6 +37,159 @@ if (dropZone && fileInput) {
             processFile(e.target.files);
         }
     });
+}
+
+// Add a button for analyzing Trees4.schematic
+window.analyzeCorrectSchematic = function() {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = '.schematic';
+    input.onchange = (e) => {
+        const file = e.target.files[0];
+        const reader = new FileReader();
+        reader.onload = (event) => {
+            analyzeSchematicFile(new Uint8Array(event.target.result), file.name);
+        };
+        reader.readAsArrayBuffer(file);
+    };
+    input.click();
+};
+
+function analyzeSchematicFile(data, filename) {
+    // Decompress GZIP
+    const decompressed = decompressGzip(data);
+    if (!decompressed) {
+        console.log("Failed to decompress");
+        return;
+    }
+    
+    // Parse NBT
+    const nbt = parseNBT(decompressed);
+    console.log("Schematic Analysis:", filename);
+    console.log("NBT Root:", nbt);
+    
+    if (nbt.Schematic && nbt.Schematic.Blocks) {
+        const blocks = nbt.Schematic.Blocks;
+        const blockCounts = {};
+        
+        for (let block of blocks) {
+            blockCounts[block] = (blockCounts[block] || 0) + 1;
+        }
+        
+        console.log("Minecraft Block IDs found in", filename + ":");
+        const sortedIds = Object.keys(blockCounts).sort((a, b) => blockCounts[b] - blockCounts[a]);
+        for (let id of sortedIds) {
+            console.log(`  MC ID ${id}: ${blockCounts[id]}x`);
+        }
+        
+        console.log("\n=== SUGGESTED MAPPING ===");
+        console.log("Based on this correct schematic, the Bloxd IDs should map to:");
+        console.log("(You'll need to match these MC IDs with the Bloxd IDs from Test.bloxdschem)");
+    }
+}
+
+function decompressGzip(data) {
+    try {
+        const stream = new DecompressionStream('gzip');
+        const writer = stream.writable.getWriter();
+        writer.write(data);
+        writer.close();
+        
+        let result = [];
+        const reader = stream.readable.getReader();
+        
+        // Read synchronously (not ideal but for analysis)
+        return new Promise((resolve) => {
+            (async () => {
+                try {
+                    while (true) {
+                        const { done, value } = await reader.read();
+                        if (done) break;
+                        result.push(...value);
+                    }
+                    resolve(new Uint8Array(result));
+                } catch (e) {
+                    console.error("Decompression error:", e);
+                    resolve(null);
+                }
+            })();
+        });
+    } catch (e) {
+        console.error("GZIP decompression not available:", e);
+        return null;
+    }
+}
+
+function parseNBT(data) {
+    // Simple NBT parser for analysis
+    let offset = 0;
+    
+    function readByte() {
+        return data[offset++];
+    }
+    
+    function readShort() {
+        const val = (data[offset] << 8) | data[offset + 1];
+        offset += 2;
+        return val;
+    }
+    
+    function readInt() {
+        const val = (data[offset] << 24) | (data[offset + 1] << 16) | (data[offset + 2] << 8) | data[offset + 3];
+        offset += 4;
+        return val;
+    }
+    
+    function readString() {
+        const len = readShort();
+        const str = new TextDecoder().decode(data.slice(offset, offset + len));
+        offset += len;
+        return str;
+    }
+    
+    function readByteArray() {
+        const len = readInt();
+        const arr = data.slice(offset, offset + len);
+        offset += len;
+        return arr;
+    }
+    
+    function parseTag() {
+        const tagType = readByte();
+        
+        if (tagType === 0x00) return null; // TAG_End
+        
+        const tagName = readString();
+        let tagValue;
+        
+        switch(tagType) {
+            case 0x01: tagValue = readByte(); break;
+            case 0x02: tagValue = readShort(); break;
+            case 0x03: tagValue = readInt(); break;
+            case 0x07: tagValue = readByteArray(); break;
+            case 0x08: tagValue = readString(); break;
+            case 0x0A: 
+                tagValue = {};
+                while (offset < data.length) {
+                    const subTag = parseTag();
+                    if (subTag === null) break;
+                    tagValue[subTag.name] = subTag.value;
+                }
+                break;
+            default: tagValue = null;
+        }
+        
+        return { name: tagName, value: tagValue };
+    }
+    
+    const result = {};
+    while (offset < data.length) {
+        const tag = parseTag();
+        if (tag === null) break;
+        result[tag.name] = tag.value;
+    }
+    
+    return result;
 }
 
 function processFile(fileList) {
@@ -73,7 +224,6 @@ function processFile(fileList) {
     reader.readAsArrayBuffer(file);
 }
 
-// NBT Helper Functions
 class NBTWriter {
     constructor() {
         this.buffer = [];
@@ -124,7 +274,7 @@ function generateSchematic(bloxdBuffer, baseName) {
     console.log("Total file size:", rawBytes.length, "bytes");
     console.log("First 50 bytes:", Array.from(rawBytes.slice(0, 50)).map(b => '0x' + b.toString(16).padStart(2, '0')).join(' '));
     
-    // Parse header: Find the end of the text header (first null byte)
+    // Parse header
     let headerEndIdx = 0;
     for (let i = 0; i < rawBytes.length; i++) {
         if (rawBytes[i] === 0) {
@@ -133,25 +283,19 @@ function generateSchematic(bloxdBuffer, baseName) {
         }
     }
     
-    // Read header as string
     const headerText = new TextDecoder().decode(rawBytes.slice(0, headerEndIdx));
     console.log("Header:", headerText, "ends at index", headerEndIdx);
     
-    // Start reading binary data after the null terminator
     let byteIdx = headerEndIdx + 1;
     
-    console.log("Byte at headerEndIdx+1:", '0x' + rawBytes[byteIdx].toString(16).padStart(2, '0'));
-    
-    // Try reading dimensions directly without padding skip first
+    // Try reading dimensions directly
     const width = view.getUint8(byteIdx);
     const height = view.getUint8(byteIdx + 1);
     const length = view.getUint8(byteIdx + 2);
     
     console.log("Potential dimensions at offset", byteIdx, ":");
     console.log("  Byte 0:", width, "Byte 1:", height, "Byte 2:", length);
-    console.log("  Hex: 0x" + width.toString(16), "0x" + height.toString(16), "0x" + length.toString(16));
     
-    // Check if this looks reasonable (dimensions between 1-256)
     let actualWidth, actualHeight, actualLength;
     if (width > 0 && width <= 256 && height > 0 && height <= 256 && length > 0 && length <= 256) {
         console.log("✓ Dimensions look valid");
@@ -161,7 +305,6 @@ function generateSchematic(bloxdBuffer, baseName) {
         byteIdx += 3;
     } else {
         console.log("✗ Dimensions don't look valid, trying with padding skip...");
-        // Skip remaining nulls
         while (byteIdx < rawBytes.length && rawBytes[byteIdx] === 0) {
             byteIdx++;
         }
@@ -181,29 +324,24 @@ function generateSchematic(bloxdBuffer, baseName) {
     let blockCount = 0;
     let rleBlocks = {};
 
-    // Parse RLE data: alternating block ID + count byte
     while (byteIdx + 1 < view.byteLength && blockCount < totalBlocks) {
         const bloxdBlockId = view.getUint8(byteIdx++);
         const count = view.getUint8(byteIdx++);
         
-        // Stop on double null (0x00 0x00)
         if (bloxdBlockId === 0 && count === 0) {
             console.log("RLE decode complete at byte", byteIdx - 2);
             break;
         }
         
-        // Track which block IDs we're seeing
         if (!rleBlocks[bloxdBlockId]) {
             rleBlocks[bloxdBlockId] = 0;
         }
         rleBlocks[bloxdBlockId] += count;
         
-        // Map Bloxd block ID to Minecraft block ID
         const mcId = bloxdToMinecraftMapping[bloxdBlockId] !== undefined 
             ? bloxdToMinecraftMapping[bloxdBlockId] 
             : 0;
         
-        // Fill blocks array with RLE count
         for (let r = 0; r < count; r++) {
             if (blockCount < totalBlocks) {
                 blocksArray[blockCount++] = mcId;
@@ -214,7 +352,6 @@ function generateSchematic(bloxdBuffer, baseName) {
     console.log("Block IDs found in RLE data:", rleBlocks);
     console.log("Block ID mappings:", Object.entries(rleBlocks).map(([id, count]) => `${id}(${count}x) → MC${bloxdToMinecraftMapping[id] || 0}`).join(", "));
 
-    // Fill remaining with air (0)
     while (blockCount < totalBlocks) {
         blocksArray[blockCount++] = 0;
     }
@@ -223,44 +360,35 @@ function generateSchematic(bloxdBuffer, baseName) {
 
     updateProgressText("Injecting NBT tags... 🏷️");
 
-    // Build NBT structure
     const nbt = new NBTWriter();
     
-    // TAG_Compound with root tag "Schematic"
-    nbt.writeByte(0x0A); // TAG_Compound
+    nbt.writeByte(0x0A);
     nbt.writeString("Schematic");
     
-    // Width (TAG_Short)
     nbt.writeByte(0x02);
     nbt.writeString("Width");
     nbt.writeShort(actualWidth);
     
-    // Height (TAG_Short)
     nbt.writeByte(0x02);
     nbt.writeString("Height");
     nbt.writeShort(actualHeight);
     
-    // Length (TAG_Short)
     nbt.writeByte(0x02);
     nbt.writeString("Length");
     nbt.writeShort(actualLength);
     
-    // Materials (TAG_String) - "Alpha" for modern MC
     nbt.writeByte(0x08);
     nbt.writeString("Materials");
     nbt.writeString("Alpha");
     
-    // Blocks (TAG_Byte_Array)
     nbt.writeByte(0x07);
     nbt.writeString("Blocks");
     nbt.writeByteArray(blocksArray);
     
-    // Data (TAG_Byte_Array) - block metadata
     nbt.writeByte(0x07);
     nbt.writeString("Data");
     nbt.writeByteArray(dataArray);
     
-    // TAG_End
     nbt.writeByte(0x00);
     
     const nbtData = nbt.toArray();
