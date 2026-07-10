@@ -69,3 +69,149 @@ function processFile(file) {
     };
     reader.readAsArrayBuffer(file);
 }
+// CLASE NBTWRITER REPARADA CON ESCRITURA EN BIG-ENDIAN ESTRICTA PARA MINECRAFT
+class NBTWriter {
+    constructor() {
+        this.buffer = [];
+    }
+    writeByte(value) { 
+        this.buffer.push(value & 0xFF); 
+    }
+    writeShort(value) { 
+        this.buffer.push((value >> 8) & 0xFF); 
+        this.buffer.push(value & 0xFF); 
+    }
+    writeInt(value) { 
+        this.buffer.push((value >> 24) & 0xFF); 
+        this.buffer.push((value >> 16) & 0xFF); 
+        this.buffer.push((value >> 8) & 0xFF); 
+        this.buffer.push(value & 0xFF); 
+    }
+    writeString(str) {
+        const encoded = new TextEncoder().encode(str);
+        this.writeShort(encoded.length);
+        for (let byte of encoded) this.buffer.push(byte);
+    }
+    writeByteArray(arr) {
+        this.writeInt(arr.length); // Longitud del array antes de los bloques
+        for (let byte of arr) this.buffer.push(byte & 0xFF);
+    }
+    getUint8Array() {
+        return new Uint8Array(this.buffer);
+    }
+}
+
+async function generateSchematic(bloxdBuffer, baseName) {
+    updateProgressText("Rebuilding RLE blocks... 🛠️");
+    
+    const view = new DataView(bloxdBuffer);
+    const rawBytes = new Uint8Array(bloxdBuffer);
+    
+    // DETECCIÓN DINÁMICA DEL NOMBRE Y LAS MEDIDAS:
+    let byteIdx = 0;
+    while (byteIdx < rawBytes.length && rawBytes[byteIdx] >= 32 && rawBytes[byteIdx] <= 126) {
+        byteIdx++;
+    }
+    byteIdx += 1;
+    
+    const width = view.getUint8(byteIdx++) || 16;
+    const height = view.getUint8(byteIdx++) || 16;
+    const length = view.getUint8(byteIdx++) || 16;
+    
+    if (byteIdx < 12) byteIdx = 12;
+    
+    const totalBlocks = width * height * length;
+    
+    // CORRECCIÓN CLAVE: Inicializamos con AIRE (0) para vaciar los espacios alrededor de la casa
+    const blocksArray = new Uint8Array(totalBlocks);
+    const dataArray = new Uint8Array(totalBlocks);
+    
+    let blockCount = 0;
+
+    // MOTOR DE DESCOMPRESIÓN RLE BINARIO
+    while (byteIdx + 1 < view.byteLength && blockCount < totalBlocks) {
+        const count = view.getUint8(byteIdx++);
+        const bloxdBlockId = view.getUint8(byteIdx++);
+        
+        if (count === 0 && bloxdBlockId === 0) break;
+        
+        // CORRECCIÓN: Si el bloque no está mapeado en tu JSON, por defecto es AIRE (0) en vez de piedra sólida
+        const mcId = bloxdToMinecraftMapping[bloxdBlockId] !== undefined ? bloxdToMinecraftMapping[bloxdBlockId] : 0;
+        
+        for (let r = 0; r < count; r++) {
+            if (blockCount < totalBlocks) {
+                blocksArray[blockCount++] = mcId;
+            }
+        }
+    }
+
+    updateProgressText("Injecting NBT tags... 🏷️");
+
+    const writer = new NBTWriter();
+    // Raíz oficial obligatoria sin nombre para evitar errores en Mine-imator
+    writer.writeByte(0x0A); writer.writeString(""); 
+    
+    writer.writeByte(0x02); writer.writeString("Width"); writer.writeShort(width);
+    writer.writeByte(0x02); writer.writeString("Height"); writer.writeShort(height);
+    writer.writeByte(0x02); writer.writeString("Length"); writer.writeShort(length);
+    writer.writeByte(0x08); writer.writeString("Materials"); writer.writeString("Alpha");
+    
+    writer.writeByte(0x07); writer.writeString("Blocks"); writer.writeByteArray(blocksArray);
+    writer.writeByte(0x07); writer.writeString("Data"); writer.writeByteArray(dataArray);
+    writer.writeByte(0x00); // Cierre del archivo
+
+    updateProgressText("Compressing into GZIP... 📦");
+
+    try {
+        const uncompressedData = writer.getUint8Array();
+        
+        const cs = new CompressionStream('gzip');
+        const compressWriter = cs.writable.getWriter();
+        compressWriter.write(uncompressedData);
+        compressWriter.close();
+
+        const gzipBlob = await new Response(cs.readable).blob();
+        
+        const link = document.createElement('a');
+        link.href = URL.createObjectURL(gzipBlob);
+        link.download = `${baseName}_converted.schematic`;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        
+        showStatus('Success! Your compatible .schematic file has been downloaded.', 'success');
+        updateProgressText("<span style='color:#00e6bc;'>Finished! File Downloaded Check your folder ✅</span>");
+        
+        setTimeout(() => {
+            updateProgressText("Drag & Drop your .bloxdschem file here 🚀<br><span style='font-size:0.8rem;color:#5c6370;'>or click to browse your computer</span>");
+        }, 4000);
+
+    } catch (err) {
+        showStatus('Compression failed.', 'error');
+        updateProgressText("<span style='color:#e06c75;'>GZIP Compression Failed ❌</span>");
+        console.error(err);
+    }
+}
+
+// FUNCIÓN MAESTRA QUE HABÍA OLVIDADO: Pinta las letras del progreso en medio de la pantalla
+function updateProgressText(htmlContent) {
+    if (dropZone) {
+        const pTag = dropZone.querySelector('p');
+        const spanTag = dropZone.querySelector('span');
+        if (pTag) {
+            pTag.innerHTML = htmlContent;
+            if (spanTag) spanTag.style.display = htmlContent.includes("Drag & Drop") ? "block" : "none";
+        } else {
+            dropZone.innerHTML = htmlContent;
+        }
+    }
+}
+
+function showStatus(message, type) {
+    if (statusDiv) {
+        statusDiv.textContent = message;
+        statusDiv.style.display = 'block';
+        statusDiv.className = 'status-message ' + (type === 'success' ? 'status-success' : 'status-error');
+    }
+}
+
